@@ -179,8 +179,9 @@ Windows-, macOS- und Linux-Rechnern – der einfachste Weg zu **allen** Installe
    git push origin v1.0.1
    ```
 3. Der Workflow läuft auf drei Runnern: `npm ci` → `npm test` → Build.
-4. Danach erstellt der Job „Draft release“ einen **Release-Entwurf** mit allen Installern und
-   `SHA256SUMS.txt` (Prüfsummen). Entwurf prüfen, Beschreibung ergänzen, veröffentlichen.
+4. Danach erstellt der Job „Release“ ein **veröffentlichtes Release** mit allen Installern und
+   `SHA256SUMS.txt` (Prüfsummen). Soll es erst geprüft werden, in `.github/workflows/build.yml`
+   `draft: false` auf `true` stellen – dann landet alles in einem Entwurf.
 
 **Weitere Auslöser**
 

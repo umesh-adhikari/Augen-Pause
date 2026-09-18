@@ -3,7 +3,7 @@
 # Generic workflow: only relevant if the project is pushed to a GitHub repository.
 #   pull_request       → build + test (no secrets, no signing), artifacts downloadable from the run
 #   workflow_dispatch  → same, started manually (signing if secrets exist)
-#   tag "v*"           → same + draft release with all installers attached
+#   tag "v*"           → same + published release with all installers attached
 #
 # Optional repository secrets (builds stay unsigned without them):
 #   WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD                 Windows code signing certificate (.pfx, base64)
@@ -116,7 +116,7 @@ jobs:
             dist/AugenPause-*.tar.gz
 
   release:
-    name: Draft release
+    name: Release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
@@ -135,12 +135,27 @@ jobs:
         working-directory: release
         run: sha256sum AugenPause-* > SHA256SUMS.txt
 
-      - name: Create draft release
+      - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: false
           name: AugenPause ${{ github.ref_name }}
           fail_on_unmatched_files: true
+          body: |
+            ## Installation
+
+            | System | Datei |
+            |---|---|
+            | Windows | `AugenPause-Setup-*-x64.exe` (Installer), `AugenPause-Portable-*.exe` (ohne Installation), `-arm64` für ARM-Geräte |
+            | macOS | `AugenPause-*-universal.dmg` (Intel + Apple Silicon) |
+            | Linux | `*.AppImage` (überall, `chmod +x`), `*.deb` (Debian/Ubuntu), `*.rpm` (Fedora/openSUSE) |
+
+            Die Builds sind **nicht signiert**: Windows SmartScreen zeigt „Weitere Informationen → Trotzdem ausführen",
+            macOS braucht Rechtsklick → Öffnen (oder `xattr -dr com.apple.quarantine /Applications/AugenPause.app`).
+            Prüfsummen stehen in `SHA256SUMS.txt`.
+
+            Alle Daten bleiben lokal, die App baut keine Netzwerkverbindungen auf.
+            Hinweise zu Linux (Wayland, Tray) stehen in `docs/PACKAGING.md`.
           files: |
             release/AugenPause-*
             release/SHA256SUMS.txt
