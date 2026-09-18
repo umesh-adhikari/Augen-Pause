@@ -1,8 +1,11 @@
-// Über: name, version, privacy, security, break-lock note, shortcuts, licence. No external links.
+// Über: updates, name, version, privacy, security, break-lock note, shortcuts, licence.
+// The only outbound link is the release page – opened by main via the `open-release-page` action.
 import { h } from '../lib/dom.js';
 import { icon, logoMark } from '../icons.js';
 import { sectionHeader, groupCard } from '../components/section.js';
 import { shortcutList } from '../components/shortcuts.js';
+import { createUpdateCard } from '../components/update.js';
+import { isMandatoryBreak } from '../lib/phase.js';
 
 export function createAboutView(ctx) {
   const { t } = ctx;
@@ -22,7 +25,8 @@ export function createAboutView(ctx) {
 
   const privacy = groupCard({ iconName: 'cloudOff', title: t('about_privacy'), tone: 'break' },
     h('p', { class: 'about-text' }, t('about_privacy_text')),
-    bullets(['about_privacy_b1', 'about_privacy_b2', 'about_privacy_b3']));
+    bullets(['about_privacy_b1', 'about_privacy_b2', 'about_privacy_b3', 'about_privacy_b4']),
+    h('p', { class: 'about-note' }, icon('about', { size: 15 }), h('span', null, t('about_privacy_update'))));
 
   const security = groupCard({ iconName: 'shield', title: t('about_security') },
     bullets(['about_sec_sandbox', 'about_sec_isolation', 'about_sec_csp', 'about_sec_scripts']));
@@ -40,12 +44,39 @@ export function createAboutView(ctx) {
   const license = groupCard({ iconName: 'file', title: t('about_license') },
     h('p', { class: 'about-text' }, t('about_license_text')));
 
+  const update = createUpdateCard(ctx);
+
   const header = sectionHeader(t('about_title'), t('about_subtitle'));
   const el = h('div', { class: 'view view-about' },
     header.el,
+    update.el,
     hero,
     h('div', { class: 'about-grid' }, privacy, security, lock, license, shortcuts),
     h('p', { class: 'about-footer' }, icon('heart', { size: 14 }), h('span', null, t('about_footer'))));
 
-  return { el };
+  // the state arrives every second, but only the Pflicht-Pause (§11) changes anything here
+  let lastMandatory = isMandatoryBreak(ctx.state);
+
+  return {
+    el,
+    onShow() {
+      lastMandatory = isMandatoryBreak(ctx.state);
+      update.render(ctx.update, ctx.state);
+      update.measure();
+      // no push channel → pull the current state once when the page becomes visible
+      ctx.pollUpdate(1);
+    },
+    onUpdate(next) {
+      update.render(next, ctx.state);
+    },
+    onState(state) {
+      const mandatory = isMandatoryBreak(state);
+      if (mandatory === lastMandatory) return;
+      lastMandatory = mandatory;
+      update.render(ctx.update, state);
+    },
+    onSettings() {
+      update.render(ctx.update, ctx.state);
+    },
+  };
 }

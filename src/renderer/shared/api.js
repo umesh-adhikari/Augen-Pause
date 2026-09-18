@@ -20,6 +20,7 @@ const fallback = Object.freeze({
   onSettings: unsub,
   onStats: unsub,
   onNavigate: unsub,
+  onUpdate: unsub,
 });
 
 /** @returns {typeof fallback} */

@@ -31,9 +31,9 @@ function deepFreeze(obj) {
   return Object.freeze(obj);
 }
 
-test('defaults match the documented contract (incl. §9 and §11 additions)', () => {
-  assert.equal(SETTINGS_VERSION, 2);
-  assert.equal(DEFAULT_SETTINGS.version, 2);
+test('defaults match the documented contract (incl. §9, §11 and §12 additions)', () => {
+  assert.equal(SETTINGS_VERSION, 3);
+  assert.equal(DEFAULT_SETTINGS.version, 3);
   assert.equal(DEFAULT_SETTINGS.language, 'system');
   assert.deepEqual(DEFAULT_SETTINGS.timer, {
     preset: 'halfhour',
@@ -61,6 +61,12 @@ test('defaults match the documented contract (incl. §9 and §11 additions)', ()
   assert.equal(DEFAULT_SETTINGS.widget.showOnWarning, true);
   assert.equal(DEFAULT_SETTINGS.widget.position, null);
   assert.deepEqual(DEFAULT_SETTINGS.meeting, { autoDetect: true });
+  assert.deepEqual(DEFAULT_SETTINGS.updates, {
+    autoCheck: true,
+    intervalHours: 24,
+    autoDownload: false,
+    includePrerelease: false,
+  });
   assert.deepEqual(DEFAULT_SETTINGS.schedule, { workingHoursEnabled: false, days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' });
   assert.deepEqual(DEFAULT_SETTINGS.hydration, { enabled: true, intervalMinutes: 45, dailyGoalGlasses: 8, glassMl: 250 });
   assert.deepEqual(PRESETS.hourly, { workMinutes: 60, shortBreakSeconds: 300, longBreakSeconds: 900, longBreakEvery: 3 });
@@ -107,7 +113,8 @@ test('sanitizeSettings: hostile input – wrong types, huge numbers, bad enums, 
     "widget": { "size": "huge", "opacity": 0, "position": { "x": 10.6, "y": -20.2 }, "showOnWarning": "false" },
     "appearance": { "theme": "dark", "accent": "<script>" },
     "general": { "autostart": true },
-    "meeting": { "autoDetect": 0 }
+    "meeting": { "autoDetect": 0 },
+    "updates": { "autoCheck": "yes", "intervalHours": 9999, "autoDownload": true, "includePrerelease": null }
   }`);
   const snapshot = JSON.stringify(input);
   const out = sanitizeSettings(input);
@@ -120,7 +127,7 @@ test('sanitizeSettings: hostile input – wrong types, huge numbers, bad enums, 
   assert.equal(out.timer.polluted, undefined);
   assert.equal(out.unknown, undefined);
 
-  assert.equal(out.version, 2);
+  assert.equal(out.version, 3);
   assert.equal(out.language, 'system');
   assert.equal(out.timer.workMinutes, 240);
   assert.equal(out.timer.shortBreakSeconds, 20);
@@ -150,6 +157,10 @@ test('sanitizeSettings: hostile input – wrong types, huge numbers, bad enums, 
   assert.equal(out.appearance.accent, 'teal');
   assert.equal(out.general.autostart, true);
   assert.equal(out.meeting.autoDetect, true);
+  assert.equal(out.updates.autoCheck, true, 'invalid → default (true)');
+  assert.equal(out.updates.intervalHours, 168, 'clamped to the §12 range');
+  assert.equal(out.updates.autoDownload, true);
+  assert.equal(out.updates.includePrerelease, false, 'invalid → default (false)');
   assert.deepEqual(JSON.parse(JSON.stringify(out)), out);
 });
 
@@ -246,7 +257,7 @@ test('store: partial old file is migrated and persisted', (t) => {
   assert.equal(s.language, 'en');
   assert.equal(s.timer.workMinutes, 20);
   assert.equal(s.timer.preset, 'custom');
-  assert.equal(s.version, 2);
+  assert.equal(s.version, 3);
   const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   assert.deepEqual(onDisk, s);
   assert.equal(onDisk.legacy, undefined);
@@ -427,32 +438,42 @@ test('breaks.overlayOpacity: number 0.2..1, rounded to 2 decimals, invalid → d
   assert.equal(res.settings.breaks.overlayOpacity, 0.2, 'previous value kept');
 });
 
-test('migration v1 → v2 (sanitizeSettings): strictMode forced on, overlayOpacity added, version 2', () => {
+test('migration v1 → v2 → v3 (sanitizeSettings): strictMode forced on, overlayOpacity + updates added', () => {
   const v1 = clone(DEFAULT_SETTINGS);
   v1.version = 1;
   v1.breaks.strictMode = false;
   v1.breaks.graceSeconds = 0;
   delete v1.breaks.overlayOpacity;
+  delete v1.updates;
   v1.language = 'de';
   const out = sanitizeSettings(v1);
-  assert.equal(out.version, 2);
+  assert.equal(out.version, 3);
   assert.equal(out.breaks.strictMode, true);
   assert.equal(out.breaks.overlayOpacity, 0.6);
   assert.equal(out.breaks.graceSeconds, 0, 'no clamp');
+  assert.deepEqual(out.updates, DEFAULT_SETTINGS.updates, '§12: the updates group gets its defaults');
   assert.equal(out.language, 'de', 'other values kept');
   assert.equal(v1.breaks.strictMode, false, 'input not mutated');
 
   const older = sanitizeSettings({ version: 0, breaks: { strictMode: false, overlayOpacity: 0.9 } });
   assert.equal(older.breaks.strictMode, true);
   assert.equal(older.breaks.overlayOpacity, 0.9, 'a valid value present in an old file is kept');
+  assert.deepEqual(older.updates, DEFAULT_SETTINGS.updates);
+
+  // a v2 file only gains the updates defaults – strictMode is NOT forced on again
+  const v2 = sanitizeSettings({ version: 2, breaks: { strictMode: false }, updates: { autoCheck: false } });
+  assert.equal(v2.version, 3);
+  assert.equal(v2.breaks.strictMode, false);
+  assert.equal(v2.updates.autoCheck, false, 'an explicit value in the old file wins');
+  assert.equal(v2.updates.intervalHours, 24);
 
   // no migration for current, future or unversioned / invalidly versioned objects
-  for (const version of [2, 3, 999, undefined, '1', null, NaN]) {
+  for (const version of [3, 4, 999, undefined, '1', null, NaN]) {
     const input = { breaks: { strictMode: false } };
     if (version !== undefined) input.version = version;
     const res = sanitizeSettings(input);
     assert.equal(res.breaks.strictMode, false, `version ${String(version)}`);
-    assert.equal(res.version, 2);
+    assert.equal(res.version, 3);
   }
   const hostile = { breaks: { strictMode: false } };
   Object.defineProperty(hostile, 'version', { enumerable: true, get() { throw new Error('boom'); } });
@@ -472,9 +493,10 @@ test('store: v1 file is migrated once and persisted; a later strictMode=false st
   const store = createSettingsStore({ filePath });
   assert.equal(store.isFirstRun, false);
   const s = store.get();
-  assert.equal(s.version, 2);
+  assert.equal(s.version, 3);
   assert.equal(s.breaks.strictMode, true);
   assert.equal(s.breaks.overlayOpacity, 0.6);
+  assert.deepEqual(s.updates, DEFAULT_SETTINGS.updates);
   assert.equal(s.timer.workMinutes, 45);
   assert.deepEqual(JSON.parse(fs.readFileSync(filePath, 'utf8')), s, 'migrated file persisted');
   assert.equal(fs.readdirSync(path.dirname(filePath)).filter((f) => f.includes('.corrupt-')).length, 0, 'no backup');
@@ -483,7 +505,32 @@ test('store: v1 file is migrated once and persisted; a later strictMode=false st
   assert.equal(store.update({ breaks: { strictMode: false } }).settings.breaks.strictMode, false);
   const again = createSettingsStore({ filePath });
   assert.equal(again.get().breaks.strictMode, false);
-  assert.equal(again.get().version, 2);
+  assert.equal(again.get().version, 3);
+});
+
+test('§12: updates group – validation, clamping and rejection of wrong types', (t) => {
+  const store = createSettingsStore({ filePath: path.join(tmpDir(t), 'settings.json') });
+  assert.deepEqual(store.get().updates,
+    { autoCheck: true, intervalHours: 24, autoDownload: false, includePrerelease: false });
+
+  let res = store.update({ updates: { autoCheck: false, intervalHours: 6, autoDownload: true, includePrerelease: true } });
+  assert.deepEqual(res.errors, []);
+  assert.deepEqual(res.settings.updates,
+    { autoCheck: false, intervalHours: 6, autoDownload: true, includePrerelease: true });
+
+  // int 6..168, rounded and clamped
+  for (const [input, expected] of [[1, 6], [5.6, 6], [168, 168], [1000, 168], [23.4, 23], [-4, 6]]) {
+    assert.equal(store.update({ updates: { intervalHours: input } }).settings.updates.intervalHours, expected, String(input));
+  }
+  res = store.update({ updates: { intervalHours: 'daily' } });
+  assert.equal(res.ok, false);
+  assert.match(res.errors[0], /^updates\.intervalHours: expected integer 6\.\.168/);
+  res = store.update({ updates: { autoCheck: 'off' } });
+  assert.equal(res.ok, false);
+  assert.match(res.errors[0], /^updates\.autoCheck: expected boolean/);
+  assert.equal(store.get().updates.autoCheck, false, 'previous value kept');
+  // unknown keys inside the group are ignored
+  assert.equal(store.update({ updates: { feedUrl: 'https://evil.example/' } }).settings.updates.feedUrl, undefined);
 });
 
 test('store.update: failed persist is reported in errors, in-memory change stays active and emits change', (t) => {

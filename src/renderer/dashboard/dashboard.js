@@ -4,7 +4,7 @@ import { applyAppearance } from '../shared/theme.js';
 import { createT } from '../shared/i18n.js';
 import STRINGS from './strings.js';
 import { h, setText, toggleClass } from './lib/dom.js';
-import { withDefaults, normalizeState, normalizeDay, emptyDay } from './lib/defaults.js';
+import { withDefaults, normalizeState, normalizeDay, normalizeUpdate, emptyDay } from './lib/defaults.js';
 import { todayKey } from './lib/fmt.js';
 import { createToast } from './components/toast.js';
 import { createSidebar, TABS } from './components/sidebar.js';
@@ -37,12 +37,15 @@ const ctx = {
   today: emptyDay(todayKey()),
   week: [],
   version: '',
-  ui: { tab: 'overview', statsRange: 7, tipOffset: 0 },
+  update: normalizeUpdate(null),
+  ui: { tab: 'overview', statsRange: 7, tipOffset: 0, updateHintDismissed: null },
   navigate,
   saveSettings,
   resetSettings,
   resetStats,
   runAction,
+  runUpdateAction,
+  pollUpdate,
   toast: (message, opts) => shell && shell.toast.show(message, opts),
 };
 
@@ -239,6 +242,79 @@ async function runAction(name, arg) {
   return res || { ok: false };
 }
 
+// ---------------------------------------------------------------------------
+// updates (docs/ARCHITECTURE.md §12)
+//
+// Main pushes the state through api.onUpdate(). If that channel is missing (older main
+// process, or a slightly different name), everything still renders: the state then comes
+// from getSnapshot(), refreshed on demand after actions and whenever a view asks for it.
+
+/** Finds the push channel even when main named it slightly differently (onUpdate, onUpdateState, …). */
+function resolveUpdatePush() {
+  if (typeof api.onUpdate === 'function') return api.onUpdate.bind(api);
+  for (const key of Object.keys(api)) {
+    if (!/^on[-_]?update/i.test(key) || /setting/i.test(key)) continue;
+    if (typeof api[key] === 'function') {
+      console.info(`[dashboard] using "${key}" as the update push channel`);
+      return api[key].bind(api);
+    }
+  }
+  return null;
+}
+
+let updatePush = null;
+let updatePollTimer = 0;
+let updatePollLeft = 0;
+
+function applyUpdate(raw) {
+  ctx.update = normalizeUpdate(raw, ctx.version);
+  if (!shell) return;
+  for (const view of shell.views.values()) view.onUpdate?.(ctx.update);
+}
+
+async function refreshUpdate() {
+  let snap = null;
+  try {
+    snap = await api.getSnapshot();
+  } catch (err) {
+    console.warn('[dashboard] getSnapshot (update) failed', err);
+  }
+  if (!snap || !snap.update) return null;
+  applyUpdate(snap.update);
+  return ctx.update;
+}
+
+/** Polls the snapshot a few times – only used while there is no push channel. */
+function pollUpdate(times = 1) {
+  if (updatePush) return;
+  updatePollLeft = Math.max(updatePollLeft, times);
+  if (updatePollTimer) return;
+  const tick = async () => {
+    updatePollTimer = 0;
+    const u = await refreshUpdate();
+    updatePollLeft -= 1;
+    const busy = Boolean(u) && (u.status === 'checking' || u.status === 'downloading');
+    if (busy) updatePollLeft = Math.max(updatePollLeft, 2);
+    if (updatePollLeft > 0) updatePollTimer = setTimeout(tick, busy ? 800 : 1600);
+  };
+  updatePollTimer = setTimeout(tick, 250);
+}
+
+async function runUpdateAction(name, arg) {
+  let res = null;
+  try {
+    res = await api.action(name, arg);
+  } catch (err) {
+    console.warn('[dashboard] update action failed', name, err);
+  }
+  if (!res || !res.ok) {
+    const blocked = res && (res.error === 'strict-mode' || res.error === 'break-running');
+    ctx.toast(ctx.t(blocked ? 'upd_install_blocked' : 'toast_action_failed'), { kind: 'error' });
+  }
+  pollUpdate(8);
+  return res || { ok: false };
+}
+
 function onState(raw) {
   if (!raw) return;
   ctx.state = normalizeState(raw, ctx.settings);
@@ -291,6 +367,8 @@ async function init() {
   api.onState(onState);
   api.onSettings((s) => { if (s) applySettings(s); });
   api.onStats(onStats);
+  updatePush = resolveUpdatePush();
+  if (updatePush) updatePush((u) => applyUpdate(u));
 
   let snap = null;
   try {
@@ -308,6 +386,7 @@ async function init() {
   const last = ctx.week[ctx.week.length - 1];
   if (last && last.date === todayKey()) ctx.today = { ...last };
   ctx.version = (snap && snap.version) || '';
+  ctx.update = normalizeUpdate(snap && snap.update, ctx.version);
 
   build();
   requestAnimationFrame(() => root.classList.add('is-ready'));

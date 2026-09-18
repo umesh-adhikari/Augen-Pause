@@ -1,0 +1,37 @@
+# AugenPause – macOS "legacy" line (Electron 32, macOS 10.15–12)
+#
+# Same source as the normal build, but with the last Electron that still supports
+# macOS 10.15 (Electron 33 raised the minimum to macOS 11, Electron 44 to macOS 13).
+# Everything not listed here comes from electron-builder.yml.
+#
+#   npx electron-builder --mac dmg zip --x64 --arm64 --publish never \
+#     --config build/electron-builder-legacy.yml
+#
+# `publish: null` is the important part: the legacy line must NEVER write a
+# latest-mac.yml, otherwise an Electron-32 build would appear on the release as
+# "the" macOS update for the Electron-44 build and would overwrite its feed. It
+# also keeps resources/app-update.yml out of the package – the legacy build is
+# "manual update" only anyway (docs/ARCHITECTURE.md §12).
+#
+# This has to be a config file: on the command line `-c.publish=null` does NOT
+# work. electron-builder 26 only coerces the string "null" to null for
+# mac.identity / nsis / nsisWeb / extraMetadata, so `publish` stays the STRING
+# "null" and the build dies with `Cannot find module for publisher "null"`.
+extends: electron-builder.yml
+
+publish: null
+
+electronVersion: 32.3.3
+
+mac:
+  minimumSystemVersion: "10.15"
+  # Hardened runtime and notarization require a Developer ID certificate; the
+  # legacy line is always built unsigned (ad-hoc signature only).
+  hardenedRuntime: false
+  notarize: false
+  # Applies to the .zip as well – without it the zip would keep the name of the
+  # normal macOS build and the two would collide on the release.
+  artifactName: ${productName}-${version}-legacy-${arch}.${ext}
+
+dmg:
+  artifactName: ${productName}-${version}-legacy-${arch}.${ext}

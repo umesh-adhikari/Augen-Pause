@@ -23,12 +23,17 @@
  * Flags:  --dev     DevTools enabled (unpackaged builds only), renderer console forwarded, F12 toggles DevTools
  *         --hidden  started by autostart → never opens the dashboard on its own
  * Dev only: AUGENPAUSE_USER_DATA=<dir> uses a separate userData directory (unpackaged builds only).
+ *           AUGENPAUSE_UPDATE_FEED / _DEV_CHECKS / _FIRST_DELAY_MS steer the update check (see updater.js).
+ *
+ * Updates (§12): wireUpdater() creates the updater after the settings / scheduler / IPC wiring. It is the
+ * only part of the app that talks to the network (api.github.com, switchable via settings.updates.autoCheck);
+ * its state is pushed on `ap:update` and travels with `ap:get-snapshot`.
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
 const { performance } = require('node:perf_hooks');
-const { app, dialog, Menu, nativeTheme, powerMonitor, session } = require('electron');
+const { app, dialog, Menu, nativeTheme, net, powerMonitor, session, shell } = require('electron');
 const { APP_ID, IPC } = require('./constants');
 const { registerPrivilegedScheme, registerAppProtocol } = require('./protocol');
 const { installGlobalSecurity, hardenSession } = require('./security');
@@ -128,6 +133,18 @@ const NOOP_NOTIFIER = Object.freeze({
   hydration() {},
   meetingDeferred() {},
   meetingDeferExpired() {},
+  updateAvailable() {},
+});
+/** §12: used until the updater is wired, and when updater.js itself is broken. */
+const NOOP_UPDATER = Object.freeze({
+  start() {},
+  stop() {},
+  check: async () => ({ ok: false, error: 'not-ready' }),
+  download: async () => ({ ok: false, error: 'not-ready' }),
+  install: () => ({ ok: false, error: 'not-ready' }),
+  openReleasePage: () => ({ ok: false, error: 'not-ready' }),
+  getUpdateState: () => null,
+  onSettingsChanged() {},
 });
 const FALLBACK = Object.freeze({
   i18n: { createMainI18n: () => ({ t: (key) => String(key), lang: () => 'en' }) },
@@ -204,6 +221,8 @@ const ctx = {
   i18n: FALLBACK.i18n.createMainI18n(),
   tray: NOOP_TRAY,
   notifier: NOOP_NOTIFIER,
+  /** §12 update check (the only network access of the app) */
+  updater: NOOP_UPDATER,
   modules: { ...FALLBACK },
 
   /** §11 break slot (session.json) – main clears it when the safety net gives up on a break */
@@ -265,7 +284,15 @@ function performAction(name, arg, source = 'internal') {
   const result = dispatchAction(name, arg, source);
   if (isDev) {
     const argText = arg === undefined ? '' : ` ${JSON.stringify(arg)}`;
-    logInfo(`${TAG}[dev] action ${name}${argText} from ${source} →`, result);
+    // the update actions answer asynchronously (§12) – log what they finally returned
+    if (result && typeof result.then === 'function') {
+      result.then(
+        (value) => logInfo(`${TAG}[dev] action ${name}${argText} from ${source} →`, value),
+        (err) => logError(`action ${name} from ${source}`, err),
+      );
+    } else {
+      logInfo(`${TAG}[dev] action ${name}${argText} from ${source} →`, result);
+    }
   }
   return result;
 }
@@ -318,6 +345,16 @@ function dispatchAction(name, arg, source = 'internal') {
         return settingsResult(updateSettings({ widget: { visible: false } }, source));
       case 'reset-widget-position':
         return settingsResult(updateSettings({ widget: { position: null } }, source));
+      // §12 updates – dashboard only (ipc-validate), and like everything else refused during a
+      // mandatory break by the strict guard above.
+      case 'check-updates':
+        return ctx.updater.check({ manual: true });
+      case 'download-update':
+        return ctx.updater.download();
+      case 'install-update':
+        return ctx.updater.install();
+      case 'open-release-page':
+        return ctx.updater.openReleasePage();
       case 'quit':
         return requestQuit();
       default:
@@ -427,6 +464,7 @@ function cleanup() {
   if (ctx.cleanedUp) return;
   ctx.cleanedUp = true;
   if (ctx.safetyTimer) clearInterval(ctx.safetyTimer);
+  safe('updater.stop', () => ctx.updater.stop());
   safe('meeting.stop', () => ctx.meeting && ctx.meeting.stop());
   safe('scheduler.stop', () => ctx.scheduler && ctx.scheduler.stop());
   flushStats();
@@ -551,6 +589,7 @@ function buildContextMenuTemplate() {
   return ctx.modules.menu.buildMenuTemplate({
     state: currentState(),
     settings: ctx.settings,
+    update: safe('updater.getUpdateState', () => ctx.updater.getUpdateState(), null),
     t,
     strictBreak: isStrictBreakActive(),
     onAction: (name, arg) => performAction(name, arg, 'menu'),
@@ -794,6 +833,10 @@ function onSettingsChange(next, prev) {
     }
     ctx.meeting.checkNow().catch((err) => logError('meeting.checkNow', err));
   }
+  // §12: interval / autoCheck / prerelease changes reschedule and reconfigure the update check.
+  if (changed(next, prev, (s) => JSON.stringify(s.updates || null))) {
+    safe('updater.onSettingsChanged', () => ctx.updater.onSettingsChanged(next, prev));
+  }
   const state = currentState();
   safe('tray.update', () => ctx.tray.update(state, next));
   safe('widget peek', () => updateWidgetPeek(state));
@@ -877,6 +920,52 @@ function wirePowerMonitor() {
     if (event && typeof event.preventDefault === 'function') event.preventDefault(); // delay shutdown until we quit
     app.quit();
   });
+}
+
+/**
+ * §12: the update check – the only outgoing network request of the app, switchable via
+ * `settings.updates.autoCheck`. Everything it decides lives in update-util.js / updater.js; main only
+ * hands in the dependencies, pushes the state on `ap:update` and keeps the tray in sync.
+ * A broken or missing updater module must never stop the app (NOOP_UPDATER).
+ */
+function wireUpdater() {
+  const { createUpdater } = optionalRequire('./updater', { createUpdater: null });
+  if (typeof createUpdater !== 'function') return;
+  const updater = safe(
+    'updater',
+    () =>
+      createUpdater({
+        app,
+        settings: { get: getSettings },
+        getState: currentState,
+        onState: (update) => safe('update state', () => onUpdateState(update)),
+        notifier: { updateAvailable: (info) => ctx.notifier.updateAvailable(info) },
+        // the allowlist (§12) is checked inside the updater before anything reaches the shell
+        shellOpen: (url) => shell.openExternal(url),
+        net,
+        // few and far between (one line per check at most) and the only diagnostics for a failing
+        // update check or a missing electron-updater – so not gated behind --dev
+        log: (...args) => logInfo(`${TAG}[update]`, ...args),
+        isStrictBreak: () => isStrictBreakActive(),
+        isBreakRunning,
+        // quitAndInstall() must not lose the day's statistics
+        prepareQuit: () => {
+          ctx.quitting = true;
+          if (ctx.windows) safe('windows.setQuitting', () => ctx.windows.setQuitting(true));
+          flushStats();
+        },
+      }),
+    null,
+  );
+  if (!updater) return;
+  ctx.updater = withDefaults(updater, NOOP_UPDATER);
+  safe('updater.start', () => ctx.updater.start());
+}
+
+/** §12: push the update state to the renderers and refresh the tray tooltip / menu. */
+function onUpdateState(update) {
+  ctx.windows.broadcast(IPC.UPDATE, update);
+  safe('tray.update', () => ctx.tray.update(currentState(), ctx.settings));
 }
 
 function wireMeetingDetector() {
@@ -993,6 +1082,7 @@ async function bootstrap() {
         t,
         getState: currentState,
         getSettings,
+        getUpdate: () => ctx.updater.getUpdateState(),
         onAction: performAction,
         onSettings: (patch) => updateSettings(patch, 'tray'),
         isStrictBreak: (state) => isStrictBreakActive(state),
@@ -1011,10 +1101,13 @@ async function bootstrap() {
     getLang: () => ctx.i18n.lang(),
     buildContextMenuTemplate,
     getSettings,
+    getUpdateState: () => ctx.updater.getUpdateState(),
     updateSettings,
     isStrictBreakActive: () => isStrictBreakActive(),
     isBreakRunning,
   });
+
+  wireUpdater();
 
   ctx.settingsStore.on('change', (next, prev) => safe('settings change handler', () => onSettingsChange(next, prev)));
   ctx.stats.on('change', (today) => safe('stats change handler', () => ctx.windows.broadcast(IPC.STATS, today)));

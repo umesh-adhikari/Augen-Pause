@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
   buildMenuTemplate, buildAppMenuTemplate, buildStatusLine, menuSignature, findMenuItem, deriveStrictBreak,
-  STRICT_BREAK_ENABLED_IDS,
+  updateAvailableVersion, STRICT_BREAK_ENABLED_IDS,
 } = require('../src/main/menu');
 const { createMainI18n } = require('../src/main/i18n');
 
@@ -70,6 +70,7 @@ function makeState(overrides = {}) {
 
 function harness({
   state = makeState(), settings = makeSettings(), lang = 'de', precision, platform = 'win32', strictBreak,
+  update = null,
 } = {}) {
   const actions = [];
   const patches = [];
@@ -77,6 +78,7 @@ function harness({
   const template = buildMenuTemplate({
     state,
     settings,
+    update,
     t: i18n.t,
     onAction: (name, ...rest) => actions.push(rest.length ? [name, rest[0]] : [name]),
     onSettings: (patch) => patches.push(patch),
@@ -125,7 +127,7 @@ function assertPlainTemplate(template) {
 
 const TAIL = [
   'interval', 'lock-screen', 'strict-mode', 'widget', 'hydration', '---',
-  'open-dashboard', 'open-settings', 'open-stats', '---',
+  'open-dashboard', 'open-settings', 'open-stats', 'check-updates', '---',
   'quit',
 ];
 
@@ -547,6 +549,79 @@ test('accelerator hints follow the platform shortcut table (§10)', () => {
   });
   walk(harness({ platform: 'linux' }).template);
   assert.deepEqual(withHints.sort(), ['open-dashboard', 'pause-indefinitely', 'snooze-5']);
+});
+
+// ---------------------------------------------------------------------------------------------
+// updates (§12)
+
+const UPDATE_AVAILABLE = {
+  capability: 'manual',
+  status: 'available',
+  currentVersion: '1.0.0',
+  latestVersion: '1.2.0',
+  releaseUrl: 'https://github.com/umesh-adhikari/Augen-Pause/releases/tag/v1.2.0',
+  assetUrl: null,
+  assetName: null,
+  progress: 0,
+  lastCheckAt: 1,
+  error: null,
+  legacyBuild: false,
+  notes: null,
+};
+
+test('§12: "Nach Updates suchen" is always there, "Update verfügbar" only with an update', () => {
+  const plain = harness();
+  assert.equal(plain.find('check-updates').label, 'Nach Updates suchen');
+  assert.equal(plain.find('update-available'), null, 'no update, no entry');
+  assert.equal(ids(plain.template).indexOf('check-updates'), ids(plain.template).indexOf('open-stats') + 1);
+
+  const { template, find, actions } = harness({ update: UPDATE_AVAILABLE });
+  assert.deepEqual(ids(template).slice(-5), ['open-stats', 'update-available', 'check-updates', '---', 'quit']);
+  assert.equal(find('update-available').label, 'Update verfügbar: 1.2.0');
+  assert.equal(find('update-available').enabled, undefined, 'enabled');
+  assertNoSeparatorGlitches(template);
+  assertPlainTemplate(template);
+
+  find('check-updates').click();
+  find('update-available').click();
+  assert.deepEqual(actions, [['check-updates'], ['open-dashboard', 'about']]);
+
+  const en = harness({ update: UPDATE_AVAILABLE, lang: 'en' });
+  assert.equal(en.find('check-updates').label, 'Check for updates');
+  assert.equal(en.find('update-available').label, 'Update available: 1.2.0');
+});
+
+test('§12: the update entries are disabled during a mandatory break', () => {
+  const state = strictBreakState();
+  const settings = makeSettings({ breaks: { strictMode: true } });
+  const { template, find } = harness({ state, settings, update: UPDATE_AVAILABLE });
+  assert.equal(find('check-updates').enabled, false);
+  assert.equal(find('update-available').enabled, false);
+  assert.deepEqual(enabledIds(template), ['drink', 'undo-drink'], 'still only the water entries');
+});
+
+test('§12: updateAvailableVersion ignores anything but a real, named update', () => {
+  assert.equal(updateAvailableVersion(UPDATE_AVAILABLE), '1.2.0');
+  assert.equal(updateAvailableVersion({ ...UPDATE_AVAILABLE, status: 'downloading' }), '1.2.0');
+  assert.equal(updateAvailableVersion({ ...UPDATE_AVAILABLE, status: 'ready' }), '1.2.0');
+  for (const status of ['idle', 'checking', 'up-to-date', 'error']) {
+    assert.equal(updateAvailableVersion({ ...UPDATE_AVAILABLE, status }), null, status);
+  }
+  for (const version of [null, '', 42, {}, 'x'.repeat(80)]) {
+    assert.equal(updateAvailableVersion({ ...UPDATE_AVAILABLE, latestVersion: version }), null, String(version));
+  }
+  for (const bad of [null, undefined, 'x', 42, []]) assert.equal(updateAvailableVersion(bad), null, String(bad));
+  // and the menu simply leaves the entry out
+  assert.equal(harness({ update: { status: 'error', error: 'http-403' } }).find('update-available'), null);
+});
+
+test('menuSignature reacts to a found update (the Linux tray menu must be rebuilt)', () => {
+  const { t } = createMainI18n(() => 'de', () => '');
+  const state = makeState();
+  const settings = makeSettings();
+  const without = menuSignature({ state, settings, t });
+  assert.equal(menuSignature({ state, settings, t, update: { status: 'checking' } }), without, 'no visible change');
+  assert.notEqual(menuSignature({ state, settings, t, update: UPDATE_AVAILABLE }), without);
 });
 
 test('english labels', () => {

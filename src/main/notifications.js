@@ -10,6 +10,7 @@
  *   notifier.hydration({ glassesToday, goal })
  *   notifier.meetingDeferred({ type })          "Meeting erkannt" – break follows after the meeting
  *   notifier.meetingDeferExpired()              "Pause wird jetzt nachgeholt" – deferral hit the 2 h limit (§10)
+ *   notifier.updateAvailable({ version })       "Neue Version verfügbar" – click opens the About page (§12)
  *   notifier.closeAll()
  *
  * Every method is a no-op when settings.general.notifications === false or notifications are
@@ -236,6 +237,20 @@ function createNotifier({ t, getSettings, assetsDir, onAction, isStrictBreak } =
         title: tr('notify.meeting.title'),
         body: tr('notify.meeting.body'),
         onClick: openOverview,
+      });
+    },
+
+    /**
+     * §12: a newer version was found. The updater calls this at most once per version and only when
+     * general.notifications is on; a click opens the dashboard's About page.
+     */
+    updateAvailable({ version } = {}) {
+      const text = typeof version === 'string' && version.length > 0 && version.length <= 64 ? version : '';
+      if (text.length === 0) return null;
+      return show('update', {
+        title: tr('notify.update.title'),
+        body: tr('notify.update.body', { version: text }),
+        onClick: () => dispatch('open-dashboard', 'about'),
       });
     },
 

@@ -21,6 +21,7 @@ const settings = {
   widget: { visible: true, alwaysOnTop: true, size: opts.size || 'medium', opacity: 0.95, showSeconds: true, showOnWarning: true, position: null },
   appearance: { theme: opts.theme || 'dark', accent: opts.accent || 'teal' },
   general: { autostart: false, globalShortcuts: true, notifications: true },
+  updates: { autoCheck: true, intervalHours: 24, autoDownload: false, includePrerelease: false },
 };
 
 function baseState() {
@@ -100,6 +101,36 @@ function scenarioState(name) {
 
 const state = scenarioState(opts.scenario);
 
+// --update <state>: up-to-date | available-auto | available-manual | downloading | ready | error | legacy
+const REPO = 'https://github.com/umesh-adhikari/Augen-Pause';
+function updateState(name) {
+  const base = {
+    capability: 'auto', status: 'up-to-date', currentVersion: '1.1.0', latestVersion: null,
+    releaseUrl: null, assetUrl: null, assetName: null, progress: 0, lastCheckAt: NOW - 3 * MIN,
+    error: null, legacyBuild: false, notes: null,
+  };
+  const found = {
+    latestVersion: '1.2.0', releaseUrl: REPO + '/releases/tag/v1.2.0',
+    assetUrl: REPO + '/releases/download/v1.2.0/AugenPause-Setup-1.2.0-x64.exe',
+    assetName: 'AugenPause-Setup-1.2.0-x64.exe',
+    notes: ['Neu: Pausen lassen sich pro Wochentag planen.',
+      'Behoben: Widget blieb nach dem Sperren des Bildschirms unsichtbar.'].join('\n'),
+  };
+  switch (name) {
+    case 'available-auto': return { ...base, status: 'available', ...found };
+    case 'available-manual': return { ...base, capability: 'manual', status: 'available', ...found,
+      assetName: 'AugenPause-1.2.0-arm64.dmg', assetUrl: REPO + '/releases/download/v1.2.0/AugenPause-1.2.0-arm64.dmg' };
+    case 'downloading': return { ...base, status: 'downloading', ...found, progress: 0.43 };
+    case 'ready': return { ...base, status: 'ready', ...found, progress: 1 };
+    case 'error': return { ...base, status: 'error', error: 'timeout' };
+    case 'legacy': return { ...base, capability: 'manual', status: 'available', legacyBuild: true, ...found,
+      assetName: 'AugenPause-1.2.0-legacy-x64.dmg', assetUrl: REPO + '/releases/download/v1.2.0/AugenPause-1.2.0-legacy-x64.dmg' };
+    case 'checking': return { ...base, status: 'checking' };
+    default: return base;
+  }
+}
+const update = updateState(opts.update || 'up-to-date');
+
 function days(n) {
   const out = [];
   for (let i = n - 1; i >= 0; i--) {
@@ -114,7 +145,7 @@ function days(n) {
   return out;
 }
 
-const listeners = { state: [], settings: [], stats: [], navigate: [] };
+const listeners = { state: [], settings: [], stats: [], navigate: [], update: [] };
 const on = (k) => (cb) => { listeners[k].push(cb); return () => { listeners[k] = listeners[k].filter((f) => f !== cb); }; };
 
 // tick the mock state so countdowns animate in --show mode
@@ -138,7 +169,7 @@ if (opts.tab) [50, 250, 800].forEach((ms) => setTimeout(() => listeners.navigate
 contextBridge.exposeInMainWorld('augenpause', {
   platform: process.platform,
   view: opts.view,
-  getSnapshot: async () => ({ state: JSON.parse(JSON.stringify(state)), settings, stats: days(7), version: '1.0.0-dev', locale: opts.lang || 'de' }),
+  getSnapshot: async () => ({ state: JSON.parse(JSON.stringify(state)), settings, stats: days(7), update, version: update.currentVersion, locale: opts.lang || 'de' }),
   updateSettings: async (patch) => { console.log('[mock] updateSettings', JSON.stringify(patch)); return { ok: true, settings, errors: [] }; },
   resetSettings: async () => settings,
   getStats: async (n) => days(n),
@@ -151,4 +182,5 @@ contextBridge.exposeInMainWorld('augenpause', {
   onSettings: on('settings'),
   onStats: on('stats'),
   onNavigate: on('navigate'),
+  onUpdate: on('update'),
 });

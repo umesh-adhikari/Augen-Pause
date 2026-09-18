@@ -19,7 +19,10 @@ directories:
   buildResources: build
 
 # Only runtime files go into app.asar. electron-builder always adds package.json
-# and applies its default ignores (.git, lock files, *.d.ts, …).
+# and applies its default ignores (.git, lock files, *.d.ts, …). The production
+# dependencies (electron-updater and its own deps) are added by electron-builder
+# from the dependency tree – only NEGATIVE patterns of this list are applied to
+# node_modules, so never add a "!node_modules/**" entry here.
 files:
   - package.json
   - src/**/*
@@ -32,11 +35,26 @@ files:
 
 asar: true
 compression: normal
-# No runtime npm dependencies → nothing to rebuild for the target Electron ABI.
+# The only runtime dependency is electron-updater (pure JavaScript, like its own
+# dependencies) → nothing to rebuild for the target Electron ABI. electron-builder
+# collects production dependencies from package.json automatically and puts them
+# into app.asar; the `files` list above must therefore never exclude node_modules
+# (only negative patterns of `files` apply to node_modules, see docs/PACKAGING.md).
 npmRebuild: false
-# Never upload anything from electron-builder itself (the optional CI workflow
-# attaches the files to a draft release). Also means no latest*.yml metadata.
-publish: null
+
+# Update metadata, NOT an upload. `provider: github` makes electron-builder
+#   • write latest.yml / latest-linux.yml / latest-mac.yml next to the installers
+#     (the feed electron-updater reads on the release), and
+#   • embed resources/app-update.yml into the package, from which electron-updater
+#     learns owner/repo at runtime.
+# Uploading stays off: every dist:* script passes `--publish never`, which only
+# disables the upload step – the metadata files are still generated (verified
+# locally, see docs/PACKAGING.md → "Updates & Releases"). The release job of
+# .github/workflows/build.yml attaches the files.
+publish:
+  provider: github
+  owner: umesh-adhikari
+  repo: Augen-Pause
 
 # Chromium UI resources: keep only the languages the app supports. Other system
 # languages fall back to en-US (same fallback as the app's own i18n).
@@ -106,8 +124,14 @@ nsis:
     - en_US
     - de_DE
   license: LICENSE
-  # No auto-updater → no blockmap-friendly (worse compressed) payload needed.
-  differentialPackage: false
+  # Differential (patch) updates: the installer payload is compressed in aligned
+  # blocks and a <installer>.exe.blockmap is written next to it. electron-updater
+  # compares the blockmap of the installed version with the new one and downloads
+  # only the changed blocks (a few MB instead of ~90 MB). The blockmap MUST be
+  # uploaded to the release next to the installer, otherwise the updater silently
+  # falls back to the full download. Costs ~11 % installer size (measured for x64:
+  # 89.0 MB -> 98.9 MB), see docs/PACKAGING.md -> "Updates & Releases".
+  differentialPackage: true
   # Removes the autostart registry entry on a real uninstall (not on update).
   include: build/installer.nsh
   # installerIcon / uninstallerIcon omitted on purpose: NSIS then uses win.icon.

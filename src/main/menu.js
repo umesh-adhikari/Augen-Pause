@@ -4,7 +4,9 @@
  * Shared native context menu (tray + widget right-click).
  * PURE: no electron require – returns plain MenuItemConstructorOptions objects with click callbacks.
  *
- *   buildMenuTemplate({ state, settings, t, onAction, onSettings, precision?, platform?, strictBreak? })
+ *   buildMenuTemplate({ state, settings, t, onAction, onSettings, precision?, platform?, strictBreak?, update? })
+ *     update: the §12 update state – adds "Nach Updates suchen" and, while an update is known,
+ *             "Update verfügbar: {version}" (opens the dashboard's About page)
  *     precision: 'second' (default, exact countdown for a menu that is popped up right now)
  *              | 'minute' (status text at minute resolution – for long-lived menus such as the Linux tray)
  *     platform:  accelerator hints show this platform's global shortcuts (default process.platform, §10)
@@ -165,6 +167,17 @@ function buildStatusLine({ state, t = identityT, precision = 'second', compact =
 /** Items that stay usable during a strict break (main's performAction allows exactly these actions). */
 const STRICT_BREAK_ENABLED_IDS = Object.freeze(['drink', 'undo-drink']);
 
+/**
+ * §12: version of a found update, or null when there is none to point at.
+ * @param {{ status?: string, latestVersion?: string }|null} update the update state (see §12)
+ */
+function updateAvailableVersion(update) {
+  if (!update || typeof update !== 'object') return null;
+  if (update.status !== 'available' && update.status !== 'downloading' && update.status !== 'ready') return null;
+  const version = update.latestVersion;
+  return typeof version === 'string' && version.length > 0 && version.length <= 64 ? version : null;
+}
+
 /** Disables an item and its whole submenu (some Linux menu hosts ignore a disabled parent). */
 function disableDeep(item) {
   if (!item || item.type === 'separator') return;
@@ -205,12 +218,13 @@ function checkedAfterClick(menuItem, current) {
  * @param {{
  *   state: object|null, settings: object|null, t: (key: string, vars?: object) => string,
  *   onAction: (name: string, arg?: any) => any, onSettings: (patch: object) => any,
- *   precision?: 'second'|'minute', platform?: string, strictBreak?: boolean
+ *   precision?: 'second'|'minute', platform?: string, strictBreak?: boolean, update?: object|null
  * }} options
  * @returns {object[]} Electron MenuItemConstructorOptions[]
  */
 function buildMenuTemplate({
-  state, settings, t, onAction, onSettings, precision = 'second', platform = process.platform, strictBreak: strictOverride,
+  state, settings, t, onAction, onSettings, precision = 'second', platform = process.platform,
+  strictBreak: strictOverride, update = null,
 } = {}) {
   const tr = typeof t === 'function' ? t : identityT;
   const act = (name, arg) => {
@@ -470,6 +484,18 @@ function buildMenuTemplate({
   });
   items.push({ id: 'open-settings', label: tr('menu.settings'), click: () => act('open-dashboard', 'settings') });
   items.push({ id: 'open-stats', label: tr('menu.stats'), click: () => act('open-dashboard', 'stats') });
+
+  // updates (§12) – the "Update verfügbar" line only exists while there is one, and it is the entry
+  // that stands out (first of the update group, with the version in the label); it opens the About page.
+  const updateVersion = updateAvailableVersion(update);
+  if (updateVersion !== null) {
+    items.push({
+      id: 'update-available',
+      label: tr('menu.updateAvailable', { version: updateVersion }),
+      click: () => act('open-dashboard', 'about'),
+    });
+  }
+  items.push({ id: 'check-updates', label: tr('menu.checkUpdates'), click: () => act('check-updates') });
   items.push({ type: 'separator' });
 
   // quit
@@ -487,7 +513,7 @@ function buildMenuTemplate({
  * Cheap fingerprint of everything that influences the template (except click targets).
  * The tray rebuilds its long-lived (Linux) menu only when this string changes.
  */
-function menuSignature({ state, settings, t, precision = 'minute', strictBreak } = {}) {
+function menuSignature({ state, settings, t, precision = 'minute', strictBreak, update = null } = {}) {
   const tr = typeof t === 'function' ? t : identityT;
   const st = state && typeof state === 'object' ? state : {};
   const s = settings && typeof settings === 'object' ? settings : {};
@@ -511,6 +537,7 @@ function menuSignature({ state, settings, t, precision = 'minute', strictBreak }
     widget.visible, widget.alwaysOnTop, widget.size,
     s.general && s.general.globalShortcuts,
     s.meeting && s.meeting.autoDetect,
+    updateAvailableVersion(update), // §12
   ]);
 }
 
@@ -580,6 +607,7 @@ module.exports = {
   menuSignature,
   findMenuItem,
   deriveStrictBreak,
+  updateAvailableVersion,
   STRICT_BREAK_ENABLED_IDS,
   PRESET_INFO,
   DEFAULT_SNOOZE_OPTIONS,

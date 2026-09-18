@@ -27,6 +27,7 @@ const IPC = Object.freeze({
   SETTINGS: 'ap:settings',
   STATS: 'ap:stats',
   NAVIGATE: 'ap:navigate',
+  UPDATE: 'ap:update',
 });
 
 function detectView() {
@@ -88,6 +89,7 @@ const api = {
   onSettings: subscribe(IPC.SETTINGS),
   onStats: subscribe(IPC.STATS),
   onNavigate: subscribe(IPC.NAVIGATE),
+  onUpdate: subscribe(IPC.UPDATE),
 };
 
 // Only trusted app://augenpause/ pages get the bridge (navigation elsewhere is blocked anyway).

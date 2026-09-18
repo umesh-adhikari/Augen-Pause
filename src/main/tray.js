@@ -3,7 +3,7 @@
 /**
  * System tray / menu bar icon.
  *
- *   const tray = createTray({ assetsDir, t, getState, getSettings, onAction, onSettings, isStrictBreak? });
+ *   const tray = createTray({ assetsDir, t, getState, getSettings, onAction, onSettings, isStrictBreak?, getUpdate? });
  *   tray.update(state, settings)   // call every second – cheap, only touches the OS on real changes
  *   tray.refreshMenu()             // force tooltip/title/menu rebuild (e.g. after a language change)
  *   tray.destroy()
@@ -94,10 +94,10 @@ function buildTooltip(state, settings, t, strict) {
  *   assetsDir: string, t: (key: string, vars?: object) => string,
  *   getState: () => object, getSettings: () => object,
  *   onAction: (name: string, arg: any, source: 'menu'|'tray') => any, onSettings: (patch: object) => any,
- *   isStrictBreak?: (state: object|null) => boolean
+ *   isStrictBreak?: (state: object|null) => boolean, getUpdate?: () => object|null
  * }} options
  */
-function createTray({ assetsDir, t, getState, getSettings, onAction, onSettings, isStrictBreak } = {}) {
+function createTray({ assetsDir, t, getState, getSettings, onAction, onSettings, isStrictBreak, getUpdate } = {}) {
   // eslint-disable-next-line global-require
   const { Tray, Menu, nativeImage, nativeTheme } = require('electron');
 
@@ -205,6 +205,7 @@ function createTray({ assetsDir, t, getState, getSettings, onAction, onSettings,
     const template = buildMenuTemplate({
       state,
       settings,
+      update: safeCall(getUpdate, null),
       strictBreak: strictFor(state),
       t: tr,
       onAction: (name, arg) => dispatchAction(name, arg, 'menu'),
@@ -229,7 +230,9 @@ function createTray({ assetsDir, t, getState, getSettings, onAction, onSettings,
   function syncMenu() {
     if (!isLinux || !alive()) return;
     const { state, settings } = current();
-    const signature = menuSignature({ state, settings, t: tr, precision: 'minute', strictBreak: strictFor(state) });
+    const signature = menuSignature({
+      state, settings, t: tr, precision: 'minute', strictBreak: strictFor(state), update: safeCall(getUpdate, null),
+    });
     if (signature === lastSignature) return;
     lastSignature = signature;
     contextMenu = buildMenu('minute');

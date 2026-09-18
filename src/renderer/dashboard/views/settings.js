@@ -4,7 +4,7 @@ import { icon } from '../icons.js';
 import { formatMinutes } from '../../shared/format.js';
 import { fmtSeconds, fmtMl, fmtDays, ordinal, MON_FIRST } from '../lib/fmt.js';
 import { PRESETS, clone } from '../lib/defaults.js';
-import { minutesOfDay } from '../lib/phase.js';
+import { minutesOfDay, isMandatoryBreak } from '../lib/phase.js';
 import { sectionHeader, groupCard } from '../components/section.js';
 import { inlineConfirm } from '../components/confirm.js';
 import { shortcutList } from '../components/shortcuts.js';
@@ -22,6 +22,8 @@ const STOPS = {
   graceSeconds: [0, 5, 10, 15, 20, 25, 30, 45, 60, 75, 90, 105, 120],
   intervalMinutes: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 75, 80, 90, 100, 105, 110, 120, 135, 150, 165, 180, 195, 210, 225, 240],
   glassMl: [50, 100, 150, 200, 250, 300, 330, 350, 400, 450, 500, 600, 700, 750, 800, 900, 1000],
+  // §12: updates.intervalHours is an int 6..168
+  updateHours: [6, 8, 12, 18, 24, 36, 48, 72, 96, 120, 168],
 };
 
 const PRESET_ORDER =['halfhour', 'hourly', '20-20-20', 'pomodoro', 'custom'];
@@ -112,6 +114,26 @@ export function createSettingsView(ctx) {
   const fmtSec = (v) => fmtSeconds(v, lang);
   const fmtOffSec = (v) => (v === 0 ? t('value_off') : fmtSeconds(v, lang));
   const fmtPct = (v) => `${Math.round(v * 100)} %`;
+  /** 24 → „täglich“, 168 → „wöchentlich“, 48 → „alle 2 Tage“, 8 → „alle 8 Std“ */
+  const fmtInterval = (v) => {
+    const hours = Math.round(Number(v) || 24);
+    if (hours === 24) return t('upd_interval_daily');
+    if (hours === 168) return t('upd_interval_weekly');
+    if (hours % 24 === 0) return t('upd_interval_days', { n: hours / 24 });
+    return t('upd_interval_hours', { n: hours });
+  };
+  /** One short sentence about the current update state, shown under the Updates card. */
+  const updateSummary = (u) => {
+    switch (u.status) {
+      case 'checking': return t('upd_status_checking');
+      case 'up-to-date': return t('upd_status_uptodate');
+      case 'available': return u.latestVersion ? t('upd_status_available', { version: u.latestVersion }) : t('upd_status_available_unknown');
+      case 'downloading': return t('upd_status_downloading', { percent: Math.round(u.progress * 100) });
+      case 'ready': return t('upd_status_ready');
+      case 'error': return t('upd_status_error');
+      default: return t('upd_current', { version: u.currentVersion || '—' });
+    }
+  };
 
   // ======================================================================
   // 1. Timer
@@ -341,7 +363,45 @@ export function createSettingsView(ctx) {
     })).el);
 
   // ======================================================================
-  // 9. General
+  // 9. Updates (§12) – the only network access of the app
+  const updateStatusLine = h('span', { class: 'inline-summary' });
+  const updateCheckRow = add(buttonRow({
+    label: t('set_update_now'),
+    help: t('set_update_now_help'),
+    buttonLabel: t('btn_update_check'),
+    buttonIcon: 'refresh',
+    onClick: () => ctx.runUpdateAction('check-updates'),
+  }));
+  // autoDownload only works where main can patch the installation itself (capability 'auto')
+  const autoDownloadCtrl = add(switchRow(env, {
+    path: 'updates.autoDownload', label: t('set_update_download'), help: t('set_update_download_help'),
+  }));
+  // §11: main refuses every update action during a Pflicht-Pause
+  let updateBlocked = false;
+  function applyUpdateState(u) {
+    const canAuto = u.capability === 'auto';
+    autoDownloadCtrl.setDisabled(!canAuto);
+    autoDownloadCtrl.setNote(canAuto ? null : t('set_update_download_off'));
+    updateCheckRow.setDisabled(updateBlocked || u.status === 'checking' || u.status === 'downloading');
+    updateCheckRow.setNote(updateBlocked ? t('upd_install_blocked') : null);
+    setText(updateStatusLine, updateSummary(u));
+  }
+  const updatesCard = groupCard({ id: 'group-updates', iconName: 'download', title: t('grp_updates'), description: t('grp_updates_desc') },
+    add(switchRow(env, { path: 'updates.autoCheck', label: t('set_update_check'), help: t('set_update_check_help') })).el,
+    add(collapsible((d) => d.updates.autoCheck, [
+      add(sliderRow(env, {
+        path: 'updates.intervalHours', label: t('set_update_interval'), help: t('set_update_interval_help'),
+        stops: STOPS.updateHours, format: (v) => fmtInterval(v),
+      })),
+    ])).el,
+    autoDownloadCtrl.el,
+    add(switchRow(env, { path: 'updates.includePrerelease', label: t('set_update_prerelease'), help: t('set_update_prerelease_help') })).el,
+    updateCheckRow.el,
+    h('div', { class: 'set-footer' }, icon('download', { size: 15 }), updateStatusLine),
+    h('p', { class: 'about-note update-privacy' }, icon('cloudOff', { size: 15 }), h('span', null, t('upd_privacy'))));
+
+  // ======================================================================
+  // 10. General
   const shortcutsHost = h('div', { class: 'shortcuts-host' }, shortcutList(ctx));
   derived.push((d) => shortcutsHost.firstChild.classList.toggle('is-disabled', !d.general.globalShortcuts));
   const generalCard = groupCard({ id: 'group-general', iconName: 'power', title: t('grp_general'), description: t('grp_general_desc') },
@@ -351,7 +411,7 @@ export function createSettingsView(ctx) {
     shortcutsHost);
 
   // ======================================================================
-  // 10. Danger zone
+  // 11. Danger zone
   const dangerCard = groupCard({ id: 'group-reset', iconName: 'alert', title: t('grp_reset'), description: t('grp_reset_desc'), tone: 'danger', className: 'danger-card' },
     customRow({
       label: t('set_reset'),
@@ -370,7 +430,8 @@ export function createSettingsView(ctx) {
   const groups = [
     ['group-timer', 'grp_timer', 'timer'], ['group-meeting', 'grp_meeting_short', 'video'], ['group-breaks', 'grp_breaks', 'coffee'],
     ['group-idle', 'grp_idle', 'away'], ['group-hydration', 'grp_water', 'droplet'], ['group-schedule', 'grp_schedule', 'briefcase'],
-    ['group-widget', 'grp_widget', 'widget'], ['group-appearance', 'grp_appearance', 'palette'], ['group-general', 'grp_general', 'power'],
+    ['group-widget', 'grp_widget', 'widget'], ['group-appearance', 'grp_appearance', 'palette'],
+    ['group-updates', 'grp_updates', 'download'], ['group-general', 'grp_general', 'power'],
   ];
   const jump = h('nav', { class: 'jump-bar', 'aria-label': t('jump_label') },
     groups.map(([id, key, ic]) => h('button', { type: 'button', class: 'jump-chip', onClick: () => ctx.navigate('settings', id) },
@@ -379,7 +440,8 @@ export function createSettingsView(ctx) {
   const header = sectionHeader(t('settings_title'), t('settings_subtitle'));
   const el = h('div', { class: 'view view-settings' },
     header.el, jump,
-    h('div', { class: 'groups' }, timerCard, meetingCard, breaksCard, idleCard, hydrationCard, scheduleCard, widgetCard, appearanceCard, generalCard, dangerCard));
+    h('div', { class: 'groups' }, timerCard, meetingCard, breaksCard, idleCard, hydrationCard, scheduleCard, widgetCard,
+      appearanceCard, updatesCard, generalCard, dangerCard));
 
   // ---- summary text -------------------------------------------------------
   function timerSummary(d) {
@@ -404,22 +466,31 @@ export function createSettingsView(ctx) {
     lockedForBreak = inBreak;
     strictCtrl.setDisabled(inBreak);
     strictCtrl.setNote(inBreak ? t('set_strict_break_note') : null);
+    updateBlocked = isMandatoryBreak(state);
+    applyUpdateState(ctx.update);
   }
 
   resync(ctx.settings);
   applyPhase(ctx.state);
+  applyUpdateState(ctx.update);
 
   return {
     el,
     onShow() {
       applyPhase(ctx.state);
+      applyUpdateState(ctx.update);
+      ctx.pollUpdate(1);
     },
     onState(state) {
       applyPhase(state);
     },
+    onUpdate(update) {
+      applyUpdateState(update);
+    },
     onSettings(settings) {
       resync(settings);
       applyPhase(ctx.state);
+      applyUpdateState(ctx.update);
     },
     destroy() {
       destroyed = true;

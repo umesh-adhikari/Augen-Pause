@@ -104,6 +104,8 @@ const STRINGS = Object.freeze({
     'menu.openDashboard': 'Dashboard öffnen',
     'menu.settings': 'Einstellungen…',
     'menu.stats': 'Statistik',
+    'menu.checkUpdates': 'Nach Updates suchen',
+    'menu.updateAvailable': 'Update verfügbar: {version}',
     'menu.quit': 'Beenden',
 
     // ---- tray -------------------------------------------------------------
@@ -132,6 +134,8 @@ const STRINGS = Object.freeze({
     'notify.hydration.body': 'Heute: {glasses} von {goal} Gläsern',
     'notify.hydration.bodyGoal': 'Tagesziel erreicht: {glasses} von {goal} Gläsern – weiter so!',
     'notify.hydration.done': 'Getrunken',
+    'notify.update.title': 'Neue Version verfügbar',
+    'notify.update.body': 'AugenPause {version} steht bereit.',
   }),
 
   en: Object.freeze({
@@ -222,6 +226,8 @@ const STRINGS = Object.freeze({
     'menu.openDashboard': 'Open dashboard',
     'menu.settings': 'Settings…',
     'menu.stats': 'Statistics',
+    'menu.checkUpdates': 'Check for updates',
+    'menu.updateAvailable': 'Update available: {version}',
     'menu.quit': 'Quit',
 
     'tray.tooltip': 'AugenPause – {status}',
@@ -248,6 +254,8 @@ const STRINGS = Object.freeze({
     'notify.hydration.body': 'Today: {glasses} of {goal} glasses',
     'notify.hydration.bodyGoal': 'Daily goal reached: {glasses} of {goal} glasses – keep it up!',
     'notify.hydration.done': 'Done',
+    'notify.update.title': 'New version available',
+    'notify.update.body': 'AugenPause {version} is ready.',
   }),
 });
 
