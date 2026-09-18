@@ -69,8 +69,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y rpm libarchive-tools
 
+      # `npm ci` fails on macOS: npm resolves optional dependencies only for the
+      # platform the lockfile was created on, so darwin-only packages
+      # (dmg-license, iconv-corefoundation, smart-buffer) are missing from it.
+      # Falling back to `npm install` resolves them on the runner.
       - name: Install dependencies
-        run: npm ci
+        shell: bash
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 
       - name: Test
         run: npm test
@@ -121,12 +126,64 @@ jobs:
             dist/AugenPause-*.rpm
             dist/AugenPause-*.tar.gz
 
+  # Same source, built with the last Electron that still supports macOS 10.15
+  # (Electron 33 raised the minimum to macOS 11, Electron 44 to macOS 13).
+  # Electron 32 receives no security updates any more – the artifacts are marked
+  # "legacy" and the release notes say so. Only worth it for old Macs.
+  macos-legacy:
+    name: macos-legacy
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        shell: bash
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - name: Build legacy installers (Electron 32, macOS 10.15+)
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npx electron-builder --mac dmg zip --x64 --arm64 --publish never \
+            -c.electronVersion=32.3.3 \
+            -c.mac.minimumSystemVersion=10.15 \
+            -c.mac.hardenedRuntime=false \
+            -c.mac.notarize=false \
+            -c.artifactName='${productName}-${version}-legacy-${arch}.${ext}' \
+            -c.dmg.artifactName='${productName}-${version}-legacy-${arch}.${ext}'
+
+      - name: List build output
+        if: always()
+        shell: bash
+        run: ls -la dist 2>/dev/null || echo "no dist directory"
+
+      - name: Upload legacy installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: AugenPause-macos-legacy
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/AugenPause-*legacy*.dmg
+            dist/AugenPause-*legacy*.zip
+
   release:
     name: Release
     # always(): a platform that fails to build must not withhold the installers of
     # the others. The release then simply carries fewer files and can be re-run later.
     if: always() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, macos-legacy]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -164,8 +221,13 @@ jobs:
             | System | Datei |
             |---|---|
             | Windows | `AugenPause-Setup-*-x64.exe` (Installer), `AugenPause-Portable-*.exe` (ohne Installation), `-arm64` für ARM-Geräte |
-            | macOS | `AugenPause-*-universal.dmg` (Intel + Apple Silicon) |
+            | macOS 13+ (Ventura und neuer) | `AugenPause-*-arm64.dmg` (Apple Silicon) oder `-x64.dmg` (Intel) |
+            | macOS 10.15–12 (Catalina, Big Sur, Monterey) | `AugenPause-*-legacy-x64.dmg`, auf älteren ARM-Macs `-legacy-arm64.dmg` |
             | Linux | `*.AppImage` (überall, `chmod +x`), `*.deb` (Debian/Ubuntu), `*.rpm` (Fedora/openSUSE) |
+
+            **Zu den `legacy`-Dateien:** gleicher Code, aber mit Electron 32 gebaut, der letzten Version mit
+            Catalina-Unterstützung. Electron 32 bekommt **keine Sicherheitsupdates** mehr und ist auf einem alten Mac
+            nicht getestet. Nimm sie nur, wenn dein macOS älter als 13 ist – sonst immer die normale Datei.
 
             Die Builds sind **nicht signiert**: Windows SmartScreen zeigt „Weitere Informationen → Trotzdem ausführen",
             macOS braucht Rechtsklick → Öffnen (oder `xattr -dr com.apple.quarantine /Applications/AugenPause.app`).

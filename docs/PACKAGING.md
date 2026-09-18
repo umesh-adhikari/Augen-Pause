@@ -18,7 +18,7 @@ npm run icons          # nur nötig, wenn das App-Icon geändert wurde (assets/i
 
 npm run pack           # nur entpackte App (dist/<plattform>-unpacked) – schneller Test
 npm run dist:win       # Windows-Installer + portable .exe      (auf Windows)
-npm run dist:mac       # macOS .dmg + .zip (Universal)           (nur auf einem Mac)
+npm run dist:mac       # macOS .dmg + .zip (x64 + arm64)          (nur auf einem Mac)
 npm run dist:linux     # Linux .AppImage, .deb, .rpm, .tar.gz    (auf Linux / WSL2 / Docker / CI)
 npm run dist           # alle Ziele des aktuellen Betriebssystems
 ```
@@ -51,13 +51,29 @@ Größe (Stand 1.0.0): Setup x64 ≈ 89 MB, Setup arm64 ≈ 83 MB, Portable ≈ 
 
 | Datei | Für wen | Hinweise |
 |---|---|---|
-| `AugenPause-1.0.0-universal.dmg` | **Standard** | Ein Download für Intel- und Apple-Silicon-Macs. Öffnen → AugenPause auf den „Applications“-Ordner ziehen. |
-| `AugenPause-1.0.0-universal.zip` | Alternative | Entpacken, `AugenPause.app` nach „Programme“ verschieben. |
+| `AugenPause-1.0.0-arm64.dmg` | **Standard, Apple Silicon** | macOS 13+ (Ventura und neuer). Öffnen → AugenPause auf den „Applications“-Ordner ziehen. |
+| `AugenPause-1.0.0-x64.dmg` | **Standard, Intel** | macOS 13+ (Ventura und neuer). |
+| `AugenPause-1.0.0-legacy-x64.dmg` | Alte Macs | macOS 10.15 (Catalina) bis 12 (Monterey), gebaut mit Electron 32. |
+| `AugenPause-1.0.0-legacy-arm64.dmg` | Alte ARM-Macs | macOS 11–12 auf Apple Silicon. |
+| `*.zip` | Alternative | Entpacken, `AugenPause.app` nach „Programme“ verschieben. |
 
-*Universal* bedeutet: x64 und arm64 in einer App (doppelte Größe, dafür keine falsche
-Download-Wahl möglich). Getrennte Pakete wären mit `arch: [x64, arm64]` statt `universal`
-unter `mac.target` in `electron-builder.yml` möglich (Dateien heißen dann `…-x64.dmg` /
-`…-arm64.dmg`).
+**Mindestversion:** Electron 44 setzt **macOS 13 (Ventura)** voraus; das steht als
+`mac.minimumSystemVersion` in `electron-builder.yml`. Ältere Systeme deckt der CI-Job
+`macos-legacy` ab: derselbe Code, gebaut mit `-c.electronVersion=32.3.3` (Electron 32 war die
+letzte Version mit macOS-10.15-Unterstützung, ab Electron 33 gilt macOS 11 als Minimum).
+
+⚠️ **Electron 32 erhält keine Sicherheitsupdates mehr** und ist hier auf keinem alten Mac
+getestet. Die Dateien heißen deshalb `…-legacy-…` und das Release weist darauf hin. Lokal baubar
+mit:
+
+```bash
+npx electron-builder --mac dmg --x64 --publish never \
+  -c.electronVersion=32.3.3 \
+  -c.mac.minimumSystemVersion=10.15 \
+  -c.mac.hardenedRuntime=false \
+  -c.artifactName='${productName}-${version}-legacy-${arch}.${ext}' \
+  -c.dmg.artifactName='${productName}-${version}-legacy-${arch}.${ext}'
+```
 
 ### Linux (`npm run dist:linux`, auf Linux / WSL2 / Docker / CI)
 
@@ -89,7 +105,7 @@ durch Test-Builds auf Windows 11:
 | Build-Rechner → | Windows-Ziele | macOS-Ziele | Linux-Ziele |
 |---|---|---|---|
 | **Windows** | ✅ Setup + Portable (x64 **und** arm64) | ❌ bricht ab: „Build for macOS is supported only on macOS“ | ❌ AppImage/deb/rpm nicht möglich (fpm/mksquashfs gibt es nicht für Windows); `tar.gz` entsteht zwar, aber **ohne Ausführungsrechte** → unbrauchbar |
-| **macOS** | ⚠️ nur mit Wine (nicht empfohlen) | ✅ dmg + zip (universal), Signierung/Notarisierung | ⚠️ teilweise (nicht empfohlen) |
+| **macOS** | ⚠️ nur mit Wine (nicht empfohlen) | ✅ dmg + zip (x64, arm64, legacy), Signierung/Notarisierung | ⚠️ teilweise (nicht empfohlen) |
 | **Linux** (auch WSL2 / Docker) | ⚠️ nur mit Wine (nicht empfohlen) | ❌ (dmg und Signierung brauchen macOS) | ✅ AppImage, deb, rpm, tar.gz (x64 und arm64) |
 | **CI (GitHub Actions)** | ✅ `windows-latest` | ✅ `macos-latest` | ✅ `ubuntu-latest` |
 
@@ -368,5 +384,5 @@ ist die Fuse *RunAsNode* abgeschaltet – dort wird die Variable ignoriert.
 5. Installer auf einem sauberen System/VM testen (Installation, Start, Tray, Autostart,
    Deinstallation).
 6. Prüfsummen erzeugen (CI: `SHA256SUMS.txt`) und Dateien weitergeben:
-   Windows → `AugenPause-Setup-X.Y.Z-x64.exe`, macOS → `AugenPause-X.Y.Z-universal.dmg`,
+   Windows → `AugenPause-Setup-X.Y.Z-x64.exe`, macOS → `AugenPause-X.Y.Z-arm64.dmg` bzw. `-x64.dmg`,
    Linux → `.deb` (Ubuntu/Debian), `.rpm` (Fedora/openSUSE) oder `.AppImage` (alle anderen).

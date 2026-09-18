@@ -134,7 +134,7 @@ Kurzfassung, jeweils auf dem passenden Betriebssystem:
 
 ```bash
 npm run dist:win     # Windows: Installer (x64 + arm64) und portable .exe
-npm run dist:mac     # macOS:   DMG + ZIP (Universal)
+npm run dist:mac     # macOS:   DMG + ZIP (x64 und arm64 getrennt)
 npm run dist:linux   # Linux:   AppImage, .deb, .rpm, .tar.gz
 ```
 

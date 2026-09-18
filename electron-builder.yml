@@ -134,6 +134,11 @@ mac:
         - x64
         - arm64
   artifactName: ${productName}-${version}-${arch}.${ext}
+  # Electron 44 needs macOS 13 (Ventura) or newer. Declaring it here makes older
+  # systems refuse the app with a clear message instead of failing at launch.
+  # Older macOS (10.15 Catalina … 12 Monterey) is covered by the separate
+  # "macos-legacy" CI job, which builds the same code with Electron 32.
+  minimumSystemVersion: "13.0"
   darkModeSupport: true
   hardenedRuntime: true
   gatekeeperAssess: false
