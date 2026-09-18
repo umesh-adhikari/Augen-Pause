@@ -100,6 +100,12 @@ jobs:
           fi
           npm run "$BUILD_SCRIPT" -- $extra
 
+      # Runs even after a failed build so the log shows what (if anything) was produced.
+      - name: List build output
+        if: always()
+        shell: bash
+        run: ls -la dist 2>/dev/null || echo "no dist directory"
+
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
@@ -117,7 +123,9 @@ jobs:
 
   release:
     name: Release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # always(): a platform that fails to build must not withhold the installers of
+    # the others. The release then simply carries fewer files and can be re-run later.
+    if: always() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -133,7 +141,16 @@ jobs:
 
       - name: Create checksums
         working-directory: release
-        run: sha256sum AugenPause-* > SHA256SUMS.txt
+        run: |
+          shopt -s nullglob
+          files=(AugenPause-*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::no installers were produced by any platform"
+            exit 1
+          fi
+          sha256sum "${files[@]}" > SHA256SUMS.txt
+          echo "Release files:"
+          ls -la
 
       - name: Create release
         uses: softprops/action-gh-release@v2

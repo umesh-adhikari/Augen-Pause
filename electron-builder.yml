@@ -121,15 +121,18 @@ portable:
 mac:
   icon: assets/icons/icon.png
   category: public.app-category.healthcare-fitness
-  # universal = one download for Intel and Apple Silicon (x64 + arm64 merged by
-  # @electron/universal; possible because there are no native modules).
+  # Separate builds per architecture instead of a merged "universal" app: the
+  # @electron/universal merge step is the most fragile part of a macOS CI build
+  # and buys little here (two downloads of ~100 MB instead of one of ~190 MB).
   target:
     - target: dmg
       arch:
-        - universal
+        - x64
+        - arm64
     - target: zip
       arch:
-        - universal
+        - x64
+        - arm64
   artifactName: ${productName}-${version}-${arch}.${ext}
   darkModeSupport: true
   hardenedRuntime: true
