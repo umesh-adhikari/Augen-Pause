@@ -1,9 +1,9 @@
 # AugenPause – build installers for Windows, macOS and Linux.
 #
 # Generic workflow: only relevant if the project is pushed to a GitHub repository.
-#   pull_request       → build + test (no secrets, no signing), artifacts downloadable from the run
-#   workflow_dispatch  → same, started manually (signing if secrets exist)
-#   tag "v*"           → same + published release with all installers attached
+#   pull_request       → unit tests only (fast feedback, no secrets, no installer builds)
+#   workflow_dispatch  → full build on all platforms, artifacts downloadable from the run
+#   tag "v*"           → full build + published release with all installers attached
 #
 # Optional repository secrets (builds stay unsigned without them):
 #   WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD                 Windows code signing certificate (.pfx, base64)
@@ -30,8 +30,28 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Pull requests (incl. forks) only get the tests: quick feedback, and no
+  # 40-minute installer build triggered by an outside contributor.
+  test:
+    name: tests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - shell: bash
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+      - run: npm test
+
   build:
     name: ${{ matrix.name }}
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -132,6 +152,7 @@ jobs:
   # "legacy" and the release notes say so. Only worth it for old Macs.
   macos-legacy:
     name: macos-legacy
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     timeout-minutes: 60
     steps:

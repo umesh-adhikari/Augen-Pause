@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Moderne Augenpausen- und Trink-Erinnerung für Windows, macOS und Linux",
   "main": "src/main/main.js",
-  "author": "AugenPause",
+  "author": "Umesh Adhikari",
   "license": "MIT",
   "desktopName": "augenpause.desktop",
   "private": true,

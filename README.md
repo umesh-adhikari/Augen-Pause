@@ -228,7 +228,15 @@ test/            Unit-Tests (node --test)
 
 ## Lizenz
 
-[MIT](LICENSE)
+[MIT](LICENSE) – Copyright © 2026 Umesh Adhikari. Nutzung, Änderung und Weitergabe sind frei,
+solange der Copyright-Hinweis erhalten bleibt. Ohne Gewährleistung.
+
+## Mitmachen & Sicherheit
+
+- Fehler melden oder Code beisteuern: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Sicherheitslücken **nicht** als öffentliches Issue, sondern über
+  [Security → Report a vulnerability](https://github.com/umesh-adhikari/Augen-Pause/security/advisories/new)
+  melden: [SECURITY.md](SECURITY.md)
 
 ---
 
@@ -297,4 +305,5 @@ power button always remain available.
 **Platform notes**: on Linux/Wayland use `--ozone-platform=x11` (the installed launchers already do); on GNOME
 the tray icon requires the AppIndicator extension.
 
-Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). License: [MIT](LICENSE).
+Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
+Security policy: [SECURITY.md](SECURITY.md). License: [MIT](LICENSE) – Copyright © 2026 Umesh Adhikari.

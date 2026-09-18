@@ -12,7 +12,7 @@
 
 appId: com.augenpause.app
 productName: AugenPause
-copyright: Copyright © 2026 AugenPause
+copyright: Copyright © 2026 Umesh Adhikari
 
 directories:
   output: dist
@@ -197,8 +197,8 @@ linux:
   # Package description AND the .desktop "Comment" (electron-builder always
   # overwrites desktop.entry.Comment with this value).
   description: Reminds you to rest your eyes and to drink enough water.
-  maintainer: AugenPause
-  vendor: AugenPause
+  maintainer: Umesh Adhikari
+  vendor: Umesh Adhikari
   # Widget always-on-top + positioning do not work under native Wayland → XWayland.
   # Applies to the .desktop launchers (deb/rpm menu entry, AppImage desktop
   # integration), NOT to starting the AppImage/binary directly from a shell.
