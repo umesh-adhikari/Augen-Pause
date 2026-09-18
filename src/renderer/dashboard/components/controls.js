@@ -420,7 +420,24 @@ export function timeRangeRow(env, { startPath, endPath, label, help, startLabel,
 export function buttonRow({ label, help, buttonLabel, iconName, buttonIcon, onClick }) {
   const btn = h('button', { type: 'button', class: 'btn btn-sm-md', onClick }, buttonIcon ? icon(buttonIcon, { size: 15 }) : null, buttonLabel);
   const shell = rowShell({ label, help, control: btn, iconName });
-  return { el: shell.el, button: btn, paths: [], sync() {}, setError: shell.setError, busy: () => false, pending: () => [] };
+  return {
+    el: shell.el,
+    button: btn,
+    paths: [],
+    sync() {},
+    setError: shell.setError,
+    busy: () => false,
+    pending: () => [],
+    /** e.g. „Jetzt prüfen“ is refused while a Pflicht-Pause runs. */
+    setDisabled(disabled) {
+      btn.disabled = Boolean(disabled);
+      shell.setRowDisabled(disabled);
+    },
+    setNote(msg) {
+      shell.setNote(msg);
+      setAttr(btn, 'aria-describedby', msg ? shell.noteEl.id : null);
+    },
+  };
 }
 
 /** Free-form row (custom right side content). */

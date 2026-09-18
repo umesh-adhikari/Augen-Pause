@@ -10,6 +10,7 @@
  *          --theme dark|light  --accent teal|violet|…  --lang de|en  --tab <dashboard tab>  --size small|medium|large
  *          --width N --height N  --delay ms (default 1200)  --out file.png  --show (keep window open, no screenshot)
  *          --opacity 0.2..1 (overlay tint)  --backdrop (overlay: paint a fake desktop behind the transparent page)
+ *          --update up-to-date|checking|available-auto|available-manual|downloading|ready|error|legacy
  *          scenarios: break = Pflicht-Pause (strict, default), break-flex / break-grace = Pflicht-Pause off
  */
 const path = require('node:path');
@@ -56,7 +57,7 @@ app.whenReady().then(async () => {
 
   const mockArgs = JSON.stringify({
     view, scenario, size,
-    theme: arg('theme', 'dark'), accent: arg('accent', 'teal'), lang: arg('lang', 'de'), tab: arg('tab', null), opacity: arg('opacity', null),
+    theme: arg('theme', 'dark'), accent: arg('accent', 'teal'), lang: arg('lang', 'de'), tab: arg('tab', null), opacity: arg('opacity', null), update: arg('update', null),
   });
 
   const win = new BrowserWindow({

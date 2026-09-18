@@ -77,8 +77,9 @@ test('every renderer → main channel has an allowlist entry', () => {
 
 test('action allowlist per view', () => {
   for (const name of ACTIONS) {
-    assert.equal(v.isActionAllowedForView(name, 'widget'), true, name);
     assert.equal(v.isActionAllowedForView(name, 'dashboard'), true, name);
+    // §12: the update actions belong to the About page – the widget does not get them
+    assert.equal(v.isActionAllowedForView(name, 'widget'), !v.DASHBOARD_ONLY_ACTIONS.includes(name), name);
   }
   assert.deepEqual(
     ACTIONS.filter((name) => v.isActionAllowedForView(name, 'overlay')).sort(),
@@ -88,6 +89,23 @@ test('action allowlist per view', () => {
   assert.equal(v.isActionAllowedForView('pause', 'overlay'), false);
   assert.equal(v.isActionAllowedForView('unknown', 'widget'), false);
   assert.equal(v.isActionAllowedForView('drink', 'unknown'), false);
+});
+
+test('§12: the update actions are dashboard only and take no argument', () => {
+  assert.deepEqual([...v.DASHBOARD_ONLY_ACTIONS].sort(),
+    ['check-updates', 'download-update', 'install-update', 'open-release-page']);
+  assert.ok(Object.isFrozen(v.DASHBOARD_ONLY_ACTIONS));
+  for (const name of v.DASHBOARD_ONLY_ACTIONS) {
+    assert.ok(ACTIONS.includes(name), `${name} is a real action`);
+    assert.equal(v.isActionAllowedForView(name, 'dashboard'), true, name);
+    assert.equal(v.isActionAllowedForView(name, 'widget'), false, name);
+    assert.equal(v.isActionAllowedForView(name, 'overlay'), false, name);
+    // any argument is dropped – these actions have none
+    assert.deepEqual(v.validateAction(name, { evil: true }), { ok: true, name, arg: undefined });
+    assert.deepEqual(v.validateAction(name, 'https://evil.example/'), { ok: true, name, arg: undefined });
+  }
+  // an update action must never reach the break screen, not even with a valid payload
+  assert.equal(v.isActionAllowedForView('install-update', 'overlay'), false);
 });
 
 test('validateAction: names', () => {

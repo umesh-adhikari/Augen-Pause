@@ -12,6 +12,9 @@
  *   installations too), breaks.overlayOpacity added with its default. The former §10 clamp
  *   "graceSeconds ≥ 5 in strict mode" is gone: a strict break has no grace period at all,
  *   graceSeconds only applies to non-strict breaks.
+ * - v2 → v3 (§12): the `updates` group (autoCheck, intervalHours, autoDownload, includePrerelease).
+ *   Older files simply get the defaults – the update check is on, so an existing installation learns
+ *   about new versions; it can be switched off in the settings.
  *
  * Every value that reaches this module from a renderer is untrusted. Only keys
  * declared in SCHEMA are ever read (own properties only), so unknown keys and
@@ -26,7 +29,7 @@
 const { EventEmitter } = require('node:events');
 const { readJson, writeJsonAtomic, backupCorrupt } = require('./store');
 
-const SETTINGS_VERSION = 2;
+const SETTINGS_VERSION = 3;
 /** settings.json is a few KB; anything above this is treated as corrupt instead of being parsed (L1). */
 const MAX_SETTINGS_BYTES = 1024 * 1024;
 
@@ -117,6 +120,12 @@ const DEFAULT_SETTINGS = deepFreeze({
   },
   meeting: {
     autoDetect: true,
+  },
+  updates: {
+    autoCheck: true,
+    intervalHours: 24,
+    autoDownload: false,
+    includePrerelease: false,
   },
 });
 
@@ -251,6 +260,12 @@ const SCHEMA = {
   meeting: {
     autoDetect: bool(),
   },
+  updates: {
+    autoCheck: bool(),
+    intervalHours: int(6, 168),
+    autoDownload: bool(),
+    includePrerelease: bool(),
+  },
 };
 
 /**
@@ -306,6 +321,8 @@ function migrate(out, fromVersion) {
     // overlayOpacity needs no step: a missing value already got its default during sanitizing.
     out.breaks.strictMode = true;
   }
+  // v2 → v3 (§12) needs no step either: the whole `updates` group is missing in an older file and
+  // therefore already carries its defaults (autoCheck on, every 24 h, no auto download, no prereleases).
 }
 
 /**

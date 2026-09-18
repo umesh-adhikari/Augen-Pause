@@ -7,6 +7,7 @@ import { toneOf, phaseLabelKey, countdownOf, cycleInfo, nextWorkStart, isMandato
 import { createRing } from '../components/ring.js';
 import { attachMenu } from '../components/menu.js';
 import { sectionHeader } from '../components/section.js';
+import { createUpdateHint } from '../components/update.js';
 
 const TIP_COUNT = 14;
 const TIP_ROTATE_MS = 45000;
@@ -246,7 +247,10 @@ export function createOverview(ctx) {
       h('button', { type: 'button', class: 'btn btn-icon btn-ghost', 'aria-label': t('tip_next'), onClick: () => stepTip(1) }, icon('chevronRight', { size: 16 }))));
   renderTip(false);
 
-  const el = h('div', { class: 'view view-overview' }, header.el, hero, tiles, tipCard);
+  // ---- update hint (§12) – slim, dismissible for the session ---------------------
+  const updateHint = createUpdateHint(ctx);
+
+  const el = h('div', { class: 'view view-overview' }, header.el, updateHint.el, hero, tiles, tipCard);
 
   // ---- updates ----------------------------------------------------------------
   let lastTone = '';
@@ -484,11 +488,16 @@ export function createOverview(ctx) {
     onShow() {
       restartTipTimer();
       onState(ctx.state);
+      updateHint.render(ctx.update);
+      ctx.pollUpdate(1);
     },
     onHide() {
       clearInterval(tipTimer);
     },
     onState,
+    onUpdate(update) {
+      updateHint.render(update);
+    },
     onSettings() {
       lastWaterSegKey = '';
       onState(ctx.state);

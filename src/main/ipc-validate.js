@@ -12,8 +12,14 @@ const { isAppUrl } = require('./protocol-path');
 const VIEWS = Object.freeze(['widget', 'dashboard', 'overlay']);
 const ALL_VIEWS = VIEWS;
 
-/** Actions an overlay (break screen) may trigger. Widget + dashboard may use all ACTIONS. */
+/** Actions an overlay (break screen) may trigger. */
 const OVERLAY_ACTIONS = Object.freeze(['skip-break', 'snooze', 'drink', 'undo-drink']);
+
+/**
+ * §12: the update actions belong to the About page – only the dashboard may use them.
+ * The widget has no update UI and the break screen must not start a download or a quit-and-install.
+ */
+const DASHBOARD_ONLY_ACTIONS = Object.freeze(['check-updates', 'download-update', 'install-update', 'open-release-page']);
 
 /**
  * Which views may use which channel (§10: the break overlay only reads the snapshot and triggers its
@@ -68,7 +74,8 @@ function isChannelAllowedForView(channel, view) {
 /** @returns {boolean} */
 function isActionAllowedForView(name, view) {
   if (!has(ACTIONS, name)) return false;
-  if (view === 'widget' || view === 'dashboard') return true;
+  if (view === 'dashboard') return true;
+  if (view === 'widget') return !has(DASHBOARD_ONLY_ACTIONS, name);
   if (view === 'overlay') return has(OVERLAY_ACTIONS, name);
   return false;
 }
@@ -180,6 +187,7 @@ function validateInteractive(value) {
 module.exports = {
   VIEWS,
   OVERLAY_ACTIONS,
+  DASHBOARD_ONLY_ACTIONS,
   CHANNEL_VIEWS,
   DRAG_PHASES,
   MAX_PATCH_DEPTH,

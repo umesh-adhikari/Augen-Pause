@@ -145,6 +145,29 @@ test('long durations, clock and time of day', () => {
   assert.equal(formatTimeOfDay(new Date(2026, 0, 1, 7, 5).getTime()), '07:05');
 });
 
+test('§12: update strings in both languages', () => {
+  const de = createMainI18n(() => 'de', () => '').t;
+  const en = createMainI18n(() => 'en', () => '').t;
+  assert.equal(de('menu.checkUpdates'), 'Nach Updates suchen');
+  assert.equal(en('menu.checkUpdates'), 'Check for updates');
+  assert.equal(de('menu.updateAvailable', { version: '1.2.0' }), 'Update verfügbar: 1.2.0');
+  assert.equal(en('menu.updateAvailable', { version: '1.2.0' }), 'Update available: 1.2.0');
+  assert.equal(de('notify.update.title'), 'Neue Version verfügbar');
+  assert.equal(de('notify.update.body', { version: '1.2.0' }), 'AugenPause 1.2.0 steht bereit.');
+  assert.equal(en('notify.update.title'), 'New version available');
+  assert.equal(en('notify.update.body', { version: '1.2.0' }), 'AugenPause 1.2.0 is ready.');
+  for (const key of ['menu.updateAvailable', 'notify.update.body']) {
+    assert.deepEqual(placeholders(STRINGS.de[key]), ['version'], key);
+    assert.deepEqual(placeholders(STRINGS.en[key]), ['version'], key);
+  }
+  // no URLs, e-mail addresses or repository paths in user-facing strings
+  for (const lang of ['de', 'en']) {
+    for (const [key, text] of Object.entries(STRINGS[lang])) {
+      assert.ok(!/https?:\/\/|@|github/i.test(text), `${lang} ${key} must not carry a link`);
+    }
+  }
+});
+
 test('mandatory break wording (§11) in both languages', () => {
   const de = createMainI18n(() => 'de', () => '').t;
   const en = createMainI18n(() => 'en', () => '').t;

@@ -41,7 +41,7 @@ test('preload exposes the complete §5 API', () => {
   assert.ok(block, 'preload.js must define const api = { … }');
   const keys = [...block[1].matchAll(/^ {2}([a-zA-Z]+):/gm)].map((m) => m[1]).sort();
   assert.deepEqual(keys, [
-    'action', 'getSnapshot', 'getStats', 'onNavigate', 'onSettings', 'onState', 'onStats', 'platform',
+    'action', 'getSnapshot', 'getStats', 'onNavigate', 'onSettings', 'onState', 'onStats', 'onUpdate', 'platform',
     'resetSettings', 'resetStats', 'setWidgetInteractive', 'showContextMenu', 'updateSettings', 'view', 'widgetDrag',
   ]);
   assert.match(PRELOAD_SOURCE, /exposeInMainWorld\('augenpause', api\)/);
@@ -55,10 +55,20 @@ test('app identity and origin', () => {
 
 test('ACTIONS and dashboard tabs match the contract', () => {
   assert.deepEqual([...constants.ACTIONS].sort(), [
-    'break-now', 'drink', 'hide-widget', 'open-dashboard', 'pause', 'quit', 'reset-timer', 'reset-widget-position',
-    'resume', 'show-widget', 'skip-break', 'snooze', 'toggle-dashboard', 'undo-drink',
+    'break-now', 'check-updates', 'download-update', 'drink', 'hide-widget', 'install-update', 'open-dashboard',
+    'open-release-page', 'pause', 'quit', 'reset-timer', 'reset-widget-position', 'resume', 'show-widget',
+    'skip-break', 'snooze', 'toggle-dashboard', 'undo-drink',
   ]);
   assert.deepEqual([...constants.DASHBOARD_TABS], ['overview', 'settings', 'stats', 'exercises', 'about']);
+});
+
+test('§12: ap:update is a push channel and the update actions exist', () => {
+  assert.equal(constants.IPC.UPDATE, 'ap:update');
+  for (const name of ['check-updates', 'download-update', 'install-update', 'open-release-page']) {
+    assert.ok(constants.ACTIONS.includes(name), name);
+  }
+  // the preload must subscribe to it (the dashboard reads the update state from there)
+  assert.match(PRELOAD_SOURCE, /onUpdate: subscribe\(IPC\.UPDATE\)/);
 });
 
 test('widgetWindowSize follows §6', () => {

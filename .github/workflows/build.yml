@@ -2,8 +2,25 @@
 #
 # Generic workflow: only relevant if the project is pushed to a GitHub repository.
 #   pull_request       → unit tests only (fast feedback, no secrets, no installer builds)
+#   push to main       → unit tests only (job name "tests" – usable as a required
+#                        status check for a branch-protection rule on main)
 #   workflow_dispatch  → full build on all platforms, artifacts downloadable from the run
 #   tag "v*"           → full build + published release with all installers attached
+#
+# Update files (see docs/ARCHITECTURE.md §12, docs/PACKAGING.md → "Updates & Releases"):
+#   electron-builder.yml has `publish: {provider: github, …}`, so every build also
+#   writes the update feed next to the installers – latest.yml (Windows),
+#   latest-mac.yml (macOS), latest-linux.yml / latest-linux-arm64.yml (Linux) – plus a
+#   <artifact>.blockmap for the NSIS installers and the macOS zip.
+#   electron-updater in the installed app reads resources/app-update.yml (owner/repo,
+#   embedded at build time), fetches latest*.yml from the release, compares the version
+#   and verifies the downloaded file against the sha512 from that file. With the
+#   blockmap of old + new installer it downloads only the changed blocks. Therefore
+#   latest*.yml and the *.blockmap files MUST be attached to the release next to the
+#   installers – a missing blockmap only costs a full download, a missing latest*.yml
+#   breaks the update check entirely.
+#   `--publish never` stays on every build: the metadata is generated locally, the
+#   upload happens exclusively in the release job below.
 #
 # Optional repository secrets (builds stay unsigned without them):
 #   WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD                 Windows code signing certificate (.pfx, base64)
@@ -17,6 +34,10 @@ name: Build
 
 on:
   push:
+    # A push event matches when EITHER filter matches: pushes to main run the
+    # tests, tag pushes run the full build + release.
+    branches:
+      - main
     tags:
       - "v*"
   pull_request:
@@ -27,14 +48,18 @@ permissions:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Never cancel a tag build (it produces the release), but supersede outdated
+  # test runs of a pull request or of main.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
 
 jobs:
-  # Pull requests (incl. forks) only get the tests: quick feedback, and no
-  # 40-minute installer build triggered by an outside contributor.
+  # Pull requests (incl. forks) and pushes to main only get the tests: quick
+  # feedback, and no 40-minute installer build triggered by an outside
+  # contributor. The job name "tests" is the identifier a required status check
+  # in the branch protection of main refers to – do not rename it.
   test:
     name: tests
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -49,9 +74,11 @@ jobs:
         run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
       - run: npm test
 
+  # Installer builds only for tags and manual runs – a push to main just runs
+  # the tests above.
   build:
     name: ${{ matrix.name }}
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -131,6 +158,9 @@ jobs:
         shell: bash
         run: ls -la dist 2>/dev/null || echo "no dist directory"
 
+      # Installers + everything electron-updater needs: latest*.yml (the feed) and
+      # the *.blockmap files (differential download). Both must end up on the
+      # release, see the header of this file.
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
@@ -145,6 +175,8 @@ jobs:
             dist/AugenPause-*.deb
             dist/AugenPause-*.rpm
             dist/AugenPause-*.tar.gz
+            dist/latest*.yml
+            dist/*.blockmap
 
   # Same source, built with the last Electron that still supports macOS 10.15
   # (Electron 33 raised the minimum to macOS 11, Electron 44 to macOS 13).
@@ -152,7 +184,7 @@ jobs:
   # "legacy" and the release notes say so. Only worth it for old Macs.
   macos-legacy:
     name: macos-legacy
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
@@ -171,24 +203,29 @@ jobs:
         shell: bash
         run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 
+      # build/electron-builder-legacy.yml extends electron-builder.yml and sets
+      # `publish: null` (plus Electron 32 and the legacy artifact names). That is
+      # what keeps this job from writing a latest-mac.yml: it would otherwise
+      # overwrite the update feed of the Electron 44 macOS build in the release and
+      # offer an unmaintained Electron 32 build as the update. The file is needed
+      # because `-c.publish=null` does NOT work on the command line – the value
+      # arrives as the string "null" and electron-builder then looks for a publish
+      # provider of that name (electron-builder 26.15.3).
       - name: Build legacy installers (Electron 32, macOS 10.15+)
         shell: bash
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           npx electron-builder --mac dmg zip --x64 --arm64 --publish never \
-            -c.electronVersion=32.3.3 \
-            -c.mac.minimumSystemVersion=10.15 \
-            -c.mac.hardenedRuntime=false \
-            -c.mac.notarize=false \
-            -c.artifactName='${productName}-${version}-legacy-${arch}.${ext}' \
-            -c.dmg.artifactName='${productName}-${version}-legacy-${arch}.${ext}'
+            --config build/electron-builder-legacy.yml
 
       - name: List build output
         if: always()
         shell: bash
         run: ls -la dist 2>/dev/null || echo "no dist directory"
 
+      # No latest*.yml / *.blockmap here on purpose – the legacy line never
+      # self-updates (docs/ARCHITECTURE.md §12: macOS = "manual").
       - name: Upload legacy installers
         uses: actions/upload-artifact@v4
         with:
@@ -220,8 +257,10 @@ jobs:
       - name: Create checksums
         working-directory: release
         run: |
-          shopt -s nullglob
-          files=(AugenPause-*)
+          shopt -s nullglob extglob
+          # Only the files a user actually downloads. *.blockmap are updater
+          # internals and their sha512 hashes are already inside latest*.yml.
+          files=(AugenPause-!(*.blockmap))
           if [ ${#files[@]} -eq 0 ]; then
             echo "::error::no installers were produced by any platform"
             exit 1
@@ -254,8 +293,16 @@ jobs:
             macOS braucht Rechtsklick → Öffnen (oder `xattr -dr com.apple.quarantine /Applications/AugenPause.app`).
             Prüfsummen stehen in `SHA256SUMS.txt`.
 
-            Alle Daten bleiben lokal, die App baut keine Netzwerkverbindungen auf.
+            Die Dateien `latest*.yml` und `*.blockmap` gehören zur Update-Funktion und müssen
+            nicht heruntergeladen werden.
+
+            AugenPause prüft in der Standardeinstellung, ob hier eine neuere Version liegt
+            (in den Einstellungen abschaltbar). Das ist die einzige Netzwerkverbindung der App,
+            alle übrigen Daten bleiben lokal.
             Hinweise zu Linux (Wayland, Tray) stehen in `docs/PACKAGING.md`.
-          files: |
-            release/AugenPause-*
-            release/SHA256SUMS.txt
+          # One pattern on purpose: `release/` contains exactly what the build jobs
+          # uploaded – installers, their *.blockmap files and latest*.yml (the update
+          # feed electron-updater reads) – plus SHA256SUMS.txt. A more specific list
+          # would fail the release (fail_on_unmatched_files) whenever a platform
+          # did not build, which must stay possible ("release what succeeded").
+          files: release/*

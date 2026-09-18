@@ -27,6 +27,8 @@ dabei jemals mitten in einem Meeting zu überraschen.
 - **Systemintegration**: Tray-/Menüleisten-Symbol mit Kontextmenü, globale Tastenkürzel, native
   Benachrichtigungen, Autostart.
 - **Design**: dunkles und helles Theme (oder automatisch), sechs Akzentfarben, Deutsch und Englisch.
+- **Update-Hinweis**: AugenPause sagt Bescheid, wenn es eine neuere Version gibt – die einzige
+  Netzwerkverbindung der App, abschaltbar. Details: [Updates](#updates).
 
 ## Pflicht-Pause
 
@@ -156,7 +158,8 @@ Die Ergebnisse landen im Ordner `dist/`.
 
 Das Kontextmenü enthält außerdem: Jetzt Pause machen (kurz/lang), Pause verschieben (+5/+10/+15/+30 Min),
 Nächste Pause überspringen, Timer zurücksetzen, Meeting-Modus / Pausieren, Wasser eintragen, Intervall,
-Bildschirmsperre, Pflicht-Pause, Widget-Optionen, Trink-Erinnerung, Dashboard, Einstellungen, Statistik
+Bildschirmsperre, Pflicht-Pause, Widget-Optionen, Trink-Erinnerung, Dashboard, Einstellungen, Statistik,
+„Nach Updates suchen“ (und, solange eine neuere Version bereitsteht, „Update verfügbar: 1.2.3“)
 und Beenden. Während einer Pflicht-Pause zeigt die erste Zeile „Pflicht-Pause – noch 1:23“ und alle Einträge
 außer den Wasser-Einträgen sind ausgegraut.
 
@@ -177,13 +180,60 @@ mit vielen IDE-Kürzeln; unter Linux wechselt `Strg+Alt+F<n>` die virtuelle Kons
 
 Ist ein Kürzel bereits von einer anderen App belegt, wird es übersprungen, alle übrigen bleiben aktiv.
 
+## Updates
+
+AugenPause prüft, ob im GitHub-Repository eine neuere Version veröffentlicht wurde. **Das ist die einzige
+Netzwerkverbindung der App** – und sie lässt sich abschalten.
+
+**Was passiert genau**
+
+- Angefragt wird ausschließlich `https://api.github.com/repos/umesh-adhikari/Augen-Pause/releases`
+  (nur HTTPS, 10 Sekunden Zeitlimit, Antwort auf 256 KB begrenzt, Ergebnis streng geprüft).
+- Zeitpunkt: rund 30 Sekunden nach dem Start und danach alle 24 Stunden (einstellbar, 6–168 Stunden).
+  Während einer Pflicht-Pause wird nicht geprüft, sondern später.
+- **Gesendet wird nichts außer der Anfrage selbst**: kein Konto, kein Token, keine Cookies, keine Kennung,
+  keine Statistik, keine Einstellungen, keine Telemetrie. Technisch unvermeidbar sind nur die Angaben jeder
+  HTTPS-Anfrage: deine IP-Adresse und der Kopf `User-Agent: AugenPause/<Version>`.
+- Gibt es keine neuere Version, passiert nichts. Gibt es eine, erscheint einmal pro Version eine
+  Benachrichtigung und im Menü der Eintrag „Update verfügbar: 1.2.3“.
+
+**Was installiert wird – und was nicht**
+
+| Installationsart                  | Verhalten                                                                  |
+|-----------------------------------|----------------------------------------------------------------------------|
+| Windows-Setup (NSIS)              | kann das Update auf Wunsch laden und beim Beenden installieren              |
+| Linux AppImage                    | kann das Update auf Wunsch laden und beim Beenden installieren              |
+| Windows portable, macOS, deb, rpm | **die App lädt nichts herunter und führt nichts aus** – sie öffnet die passende Datei bzw. die Release-Seite im Browser, alles Weitere machst du selbst |
+
+Heruntergeladen wird auch in den ersten beiden Fällen nur, wenn du es anstößt (oder „Updates automatisch
+herunterladen“ einschaltest); installiert wird erst beim nächsten Beenden. Nie während einer Pflicht-Pause.
+Externe Links öffnet die App nur, wenn sie mit
+`https://github.com/umesh-adhikari/Augen-Pause/releases/` beginnen – alles andere wird abgelehnt.
+
+**Abschalten**: *Einstellungen → Updates → „Automatisch nach Updates suchen“* ausschalten
+(entspricht `updates.autoCheck: false` in der `settings.json`). Danach geht **keine einzige** Verbindung
+mehr raus; die manuelle Suche im Menü bleibt natürlich möglich.
+
+| Einstellung                          | Bedeutung                                              | Standard |
+|--------------------------------------|--------------------------------------------------------|----------|
+| `updates.autoCheck`                  | automatisch suchen                                     | an       |
+| `updates.intervalHours`              | Abstand zwischen zwei Prüfungen (6–168 Stunden)        | 24       |
+| `updates.autoDownload`               | gefundenes Update sofort laden (nur Setup / AppImage)  | aus      |
+| `updates.includePrerelease`          | auch Vorabversionen anbieten                           | aus      |
+
 ## Sicherheit & Datenschutz
 
 - **Alles bleibt lokal**: Einstellungen (`settings.json`), Statistik (`stats.json`) und eine laufende
   Pflicht-Pause (`session.json`) liegen als JSON-Dateien im Benutzerprofil (Windows `%APPDATA%\AugenPause`,
   macOS `~/Library/Application Support/AugenPause`, Linux `~/.config/AugenPause`).
-- **Keine Netzwerkverbindungen**: kein Konto, keine Telemetrie, keine Updates aus dem Netz, keine externen
-  Schriftarten oder Skripte.
+- **Genau eine Netzwerkverbindung – die Update-Prüfung**: AugenPause fragt bei
+  `https://api.github.com/repos/umesh-adhikari/Augen-Pause/releases` nach neueren Versionen. Gesendet wird
+  dabei nichts außer der Anfrage selbst (kein Konto, kein Token, keine Cookies, keine Kennung, keine
+  Telemetrie); abschaltbar unter *Einstellungen → Updates*. Auf macOS, portabel, deb und rpm lädt und
+  startet die App **keine** Installer. Details: [Updates](#updates).
+- **Sonst nichts nach draußen**: kein Konto, keine Telemetrie, keine Werbung, keine externen Schriftarten
+  oder Skripte; die Oberflächen selbst dürfen per Content-Security-Policy (`connect-src 'none'`) gar keine
+  Verbindung aufbauen – die Prüfung läuft ausschließlich im Hauptprozess.
 - **Gehärtete Oberfläche**: Alle Fenster laufen in der Chromium-Sandbox mit Context Isolation und ohne
   Node-Zugriff, Inhalte kommen nur über ein eigenes `app://`-Protokoll, strikte Content-Security-Policy,
   jede IPC-Nachricht wird geprüft; Navigation, neue Fenster, Downloads und Berechtigungsanfragen sind gesperrt.
@@ -214,7 +264,10 @@ Ist ein Kürzel bereits von einer anderen App belegt, wird es übersprungen, all
 
 ## Architektur
 
-Electron (Hauptprozess CommonJS, Oberflächen als native ES-Module), keine Laufzeit-Abhängigkeiten.
+Electron (Hauptprozess CommonJS, Oberflächen als native ES-Module), praktisch keine Laufzeit-Abhängigkeiten:
+Die einzige ist `electron-updater`, und sie wird ausschließlich dann geladen, wenn ein Update tatsächlich
+installiert werden kann (Windows-Setup, Linux-AppImage). Fehlt das Paket, verhält sich die App wie bei allen
+anderen Installationsarten – sie öffnet die Release-Seite im Browser statt selbst etwas herunterzuladen.
 Schnittstellen, Einstellungen, Zustandsmodell und Sicherheitsregeln sind in
 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** beschrieben.
 
@@ -298,9 +351,20 @@ meeting starting during a break ends it.
 terminals on Linux). "Break now" and "log a glass of water" are available in the context menu and the widget.
 All three shortcuts are no-ops while a mandatory break is running.
 
-**Privacy & security**: everything stays on your computer, no network connections, sandboxed renderers with a
-strict CSP. The break lock is a transparent overlay window, not a system lock; `Ctrl+Alt+Del` / `Win+L` and the
-power button always remain available.
+**Updates**: AugenPause checks `https://api.github.com/repos/umesh-adhikari/Augen-Pause/releases` for a newer
+version – about 30 seconds after start and then every 24 hours (6–168 h, configurable). **This is the only
+network connection the app makes**, and it can be switched off (*Settings → Updates*, `updates.autoCheck`).
+Nothing but the request itself is sent: no account, no token, no cookies, no identifier, no telemetry – only
+what any HTTPS request carries (your IP address and the header `User-Agent: AugenPause/<version>`). The
+Windows setup install and the Linux AppImage can download an update and install it on quit (only when you ask
+for it, never during a mandatory break); on macOS, the portable Windows build and deb/rpm the app **never
+downloads or runs an installer** – it opens the matching file or the release page in your browser. External
+links are only ever opened when they start with `https://github.com/umesh-adhikari/Augen-Pause/releases/`.
+
+**Privacy & security**: everything else stays on your computer, the renderers cannot open any connection at all
+(CSP `connect-src 'none'`), they are sandboxed with context isolation and no Node access. The break lock is a
+transparent overlay window, not a system lock; `Ctrl+Alt+Del` / `Win+L` and the power button always remain
+available.
 
 **Platform notes**: on Linux/Wayland use `--ozone-platform=x11` (the installed launchers already do); on GNOME
 the tray icon requires the AppIndicator extension.

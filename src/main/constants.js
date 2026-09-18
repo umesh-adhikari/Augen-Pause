@@ -28,6 +28,7 @@ const IPC = Object.freeze({
   SETTINGS: 'ap:settings',
   STATS: 'ap:stats',
   NAVIGATE: 'ap:navigate',
+  UPDATE: 'ap:update',
 });
 
 const PHASES = Object.freeze(['work', 'break', 'paused', 'away', 'off-hours']);
@@ -46,6 +47,11 @@ const ACTIONS = Object.freeze([
   'show-widget',
   'hide-widget',
   'reset-widget-position',
+  // §12 updates – dashboard only (see ipc-validate.js DASHBOARD_ONLY_ACTIONS)
+  'check-updates',
+  'download-update',
+  'install-update',
+  'open-release-page',
   'quit',
 ]);
 

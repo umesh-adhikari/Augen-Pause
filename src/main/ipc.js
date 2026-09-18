@@ -16,6 +16,10 @@
  *   5. the payload passes the pure validators from ipc-validate.js.
  * Invoke channels reject with Error('forbidden'); send channels are ignored. Denials are logged once per reason.
  *
+ * Updates (§12): `ap:get-snapshot` carries the update state as `update` (when main passes getUpdateState);
+ * the update actions are allowlisted for the dashboard only (ipc-validate.js DASHBOARD_ONLY_ACTIONS) and
+ * main's performAction refuses them during a mandatory break like every other action.
+ *
  * Mandatory break (§11): settings patches go through main's updateSettings() (the same guard as menu / tray:
  * only language + appearance.* during a strict break), actions through performAction() (only drink / undo-drink),
  * reset-settings is rejected during ANY break ({ ok: false, error, settings }) and reset-stats during a
@@ -99,6 +103,7 @@ function normalizeResult(result) {
  *   getLang: () => string,
  *   buildContextMenuTemplate: () => object[],
  *   getSettings?: () => object,
+ *   getUpdateState?: () => object,
  *   updateSettings?: (patch: object, source: string) => { ok: boolean, settings: object, errors: string[] },
  *   isStrictBreakActive?: () => boolean,
  *   isBreakRunning?: () => boolean,
@@ -190,13 +195,23 @@ function registerIpc(deps) {
         log(`markOverlayReady failed: ${err && err.message}`);
       }
     }
-    return {
+    const snapshot = {
       state: scheduler.getState(),
       settings: settingsStore.get(),
       stats: stats.getRange(7),
       version: app.getVersion(),
       locale: getLang(),
     };
+    // §12: the update state travels with the snapshot and is pushed on ap:update afterwards.
+    if (typeof deps.getUpdateState === 'function') {
+      try {
+        const update = deps.getUpdateState();
+        if (update && typeof update === 'object') snapshot.update = update;
+      } catch (err) {
+        log(`getUpdateState failed: ${err && err.message}`);
+      }
+    }
+    return snapshot;
   });
 
   handle(IPC.UPDATE_SETTINGS, (view, event, patch) => {

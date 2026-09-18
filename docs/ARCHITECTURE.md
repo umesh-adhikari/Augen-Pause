@@ -304,7 +304,7 @@ window.augenpause = {
   platform: 'win32' | 'darwin' | 'linux',
   view: 'widget' | 'dashboard' | 'overlay',             // derived from location
 
-  getSnapshot(): Promise<{ state, settings, stats: DayStats[] /* last 7 days */, version, locale }>,
+  getSnapshot(): Promise<{ state, settings, stats: DayStats[] /* last 7 days */, update /* §12 */, version, locale }>,
   updateSettings(patch): Promise<{ ok, settings, errors }>,
   resetSettings(): Promise<Settings>,
   getStats(days): Promise<DayStats[]>,
@@ -318,7 +318,8 @@ window.augenpause = {
   onState(cb): () => void,                               // SchedulerState, every second + on change
   onSettings(cb): () => void,                            // Settings, on change
   onStats(cb): () => void,                               // DayStats (today), on change
-  onNavigate(cb): () => void                             // dashboard only: tab name 'overview'|'settings'|'stats'|'exercises'|'about'
+  onNavigate(cb): () => void,                            // dashboard only: tab name 'overview'|'settings'|'stats'|'exercises'|'about'
+  onUpdate(cb): () => void                               // update state (§12), dashboard only
 }
 ```
 
@@ -601,3 +602,78 @@ breaks.overlayOpacity: 0.6       // number 0.2..1 – opacity of the dark tint o
   disabled/folded with a note when Pflicht-Pause is on.
 - Menu/tray/i18n: "Strenger Modus" → "Pflicht-Pause"; during a strict break every actionable item is disabled; status line
   "Pflicht-Pause – noch 1:23"; quit disabled.
+
+---------------------------------------------------------------------------------
+
+## 12. Updates (ADDENDUM – binding)
+
+The app checks GitHub releases for a newer version. This is the ONLY network access in the app; it is
+configurable and must be documented wherever the "no network connections" claim appears
+(README, SECURITY.md, dashboard About page).
+
+### Capability per installation (detected at runtime, never guessed)
+| installation | detection | capability |
+|---|---|---|
+| Windows NSIS setup | `process.platform === 'win32'` && not portable | `auto` – electron-updater, differential (blockmap) download, install on quit |
+| Windows portable | `process.env.PORTABLE_EXECUTABLE_FILE` set | `manual` |
+| Linux AppImage | `process.env.APPIMAGE` set | `auto` – electron-updater |
+| Linux deb/rpm/tar.gz | linux without APPIMAGE | `manual` (package manager owns the files) |
+| macOS | always | `manual` (Squirrel.Mac requires a signed app; builds are unsigned) |
+| macOS legacy build | `major(process.versions.electron) < 40` | `manual` + only `*legacy*` assets may be offered |
+| dev run | `!app.isPackaged` | `manual`, checks disabled by default |
+
+`manual` = the app tells the user and opens the matching asset URL (or the release page) in the browser
+via `shell.openExternal`. The app never downloads or executes an installer itself in that mode.
+
+### Settings additions (§2)
+```js
+updates: {
+  autoCheck: true,          // bool  – check ~30 s after start and then every intervalHours
+  intervalHours: 24,        // int 6..168
+  autoDownload: false,      // bool  – only honoured where capability === 'auto'
+  includePrerelease: false, // bool
+}
+```
+
+### Update state (own push channel `ap:update`, also part of `ap:get-snapshot` as `update`)
+```js
+{
+  capability: 'auto' | 'manual',
+  status: 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'ready' | 'error',
+  currentVersion: '1.1.0',
+  latestVersion: null,        // string when known
+  releaseUrl: null,           // https://github.com/<owner>/<repo>/releases/tag/vX.Y.Z
+  assetUrl: null,             // best matching asset for this platform/arch/variant
+  assetName: null,
+  progress: 0,                // 0..1 while downloading
+  lastCheckAt: null,          // ms epoch
+  error: null,                // short code/message, never a stack
+  legacyBuild: false,
+  notes: null,                // release name/body trimmed to ≤ 2000 chars, rendered as TEXT only
+}
+```
+
+### Actions (§5 additions, dashboard only; widget/overlay must NOT get them)
+`check-updates`, `download-update`, `install-update` (quit + install; refused during a break),
+`open-release-page`.
+
+### Security rules
+- HTTPS only. Release info from `https://api.github.com/repos/<owner>/<repo>/releases` with a 10 s timeout,
+  `User-Agent: AugenPause/<version>`, no credentials, no cookies, response size cap (256 KB), strict JSON validation.
+- Tags must match `^v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`; versions compared with a small semver comparator (own code, tested).
+  A "newer" version must be strictly greater than the running one; downgrades are never offered.
+- `shell.openExternal` only for URLs that match `^https://github\.com/<owner>/<repo>/releases/` or the exact asset
+  download host `^https://github\.com/<owner>/<repo>/releases/download/`. Everything else is rejected and logged.
+- Release notes are inserted with `textContent` only (never HTML/markdown rendering).
+- electron-updater is configured with `autoDownload = false` (the app decides), `allowDowngrade = false`,
+  `allowPrerelease` from settings; it is only imported/used when capability === 'auto'.
+- No check while a mandatory break is running, none in the first 20 s after start, none when `autoCheck` is off,
+  at most one in-flight check, failures are silent (state only) and never open a dialog.
+- The legacy macOS build must never be offered a non-legacy asset (asset name must contain `legacy`).
+
+### Build/publish requirements
+- `electron-builder.yml` gets a `publish` block (`provider: github`, owner/repo) so `latest.yml`,
+  `latest-linux.yml` and `latest-mac.yml` are generated; uploads still only happen through the release job.
+- NSIS: `differentialPackage: true` (blockmap) so Windows gets small patch downloads.
+- The `macos-legacy` CI job builds with `-c.publish=null` so it cannot overwrite `latest-mac.yml`.
+- The release must carry `latest*.yml` next to the installers.

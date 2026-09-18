@@ -8,7 +8,16 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
+      # electron-updater is the only runtime dependency – it is shipped inside
+      # app.asar, so it gets its own pull request instead of being buried in the
+      # build-tooling update. Its builder-util-runtime version has to stay in sync
+      # with the one electron-builder uses (docs/PACKAGING.md → "Updates & Releases").
+      runtime-dependencies:
+        dependency-type: production
+        patterns:
+          - "*"
       dev-dependencies:
+        dependency-type: development
         patterns:
           - "*"
 
