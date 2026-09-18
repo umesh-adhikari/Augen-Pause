@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  AugenPause – macOS Hardened-Runtime-Entitlements (App + alle Helper, siehe
+  mac.entitlements / mac.entitlementsInherit in electron-builder.yml).
+
+  Bewusst minimal:
+  - com.apple.security.cs.allow-jit
+      V8 (JavaScript-JIT im Main-, Renderer- und GPU-Prozess) braucht unter der
+      Hardened Runtime MAP_JIT-Speicher. Genau diesen Eintrag setzen auch die
+      Standard-Entitlements von @electron/osx-sign für App, Renderer und GPU.
+
+  Bewusst NICHT enthalten:
+  - com.apple.security.cs.allow-unsigned-executable-memory
+      Seit Electron 12 nicht mehr nötig (V8 nutzt MAP_JIT).
+  - com.apple.security.cs.disable-library-validation
+      Nur nötig für native Node-Module/Plugins mit fremder Team-ID bzw. für
+      Ad-hoc-Signaturen MIT Hardened Runtime. AugenPause hat keine nativen
+      Module; unsignierte Builds laufen ohne Hardened Runtime (siehe
+      docs/PACKAGING.md).
+  - Kamera/Mikrofon/Standort/USB/Bluetooth/Drucker (osx-sign-Defaults)
+      Die App benötigt keine dieser Berechtigungen.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+  </dict>
+</plist>

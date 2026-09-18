@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="de" data-theme="dark" data-accent="teal" data-break="short">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; media-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>AugenPause</title>
+  <link rel="stylesheet" href="../shared/tokens.css">
+  <link rel="stylesheet" href="../shared/base.css">
+  <link rel="stylesheet" href="./overlay.css">
+  <script type="module" src="./overlay.js"></script>
+</head>
+<body>
+  <!-- shared SVG paint servers (ring, brand mark, illustrations) -->
+  <svg class="svg-defs" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="ring-grad" gradientUnits="userSpaceOnUse" x1="170" y1="10" x2="30" y2="190">
+        <stop offset="0" class="stop-ring-1"/>
+        <stop offset="1" class="stop-ring-2"/>
+      </linearGradient>
+      <linearGradient id="il-grad" gradientUnits="userSpaceOnUse" x1="10" y1="10" x2="110" y2="110">
+        <stop offset="0" class="stop-ring-1"/>
+        <stop offset="1" class="stop-ring-2"/>
+      </linearGradient>
+      <linearGradient id="il-water-grad" gradientUnits="userSpaceOnUse" x1="40" y1="30" x2="80" y2="110">
+        <stop offset="0" class="stop-water-1"/>
+        <stop offset="1" class="stop-water-2"/>
+      </linearGradient>
+      <linearGradient id="mark-grad" gradientUnits="userSpaceOnUse" x1="2" y1="2" x2="30" y2="30">
+        <stop offset="0" class="stop-ring-1"/>
+        <stop offset="1" class="stop-ring-2"/>
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <!-- Transparent break lock: the dark tint over the desktop is painted by <body> (overlay.css, alpha from
+       settings via --overlay-alpha on :root), so it never depends on the entrance animation of .app below. -->
+
+  <div class="app" id="app">
+    <!-- decorative layers only – a very soft aurora and a vignette on top of the body tint -->
+    <div class="backdrop" aria-hidden="true">
+      <div class="aurora">
+        <div class="blob blob-a"></div>
+        <div class="blob blob-b"></div>
+        <div class="blob blob-c"></div>
+      </div>
+      <div class="vignette"></div>
+    </div>
+
+    <div class="layout">
+      <header class="topbar">
+        <div class="brand glass-chip">
+          <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+            <circle class="mark-track" cx="16" cy="16" r="13"/>
+            <path class="mark-arc" d="M16 3 A13 13 0 1 1 4.74 22.5"/>
+            <path class="mark-eye" d="M8.5 16 Q16 9.5 23.5 16 Q16 22.5 8.5 16 Z"/>
+            <circle class="mark-pupil" cx="16" cy="16" r="2.4"/>
+          </svg>
+          <span class="brand-name" id="brandName">AugenPause</span>
+        </div>
+
+        <div class="topbar-center">
+          <div class="hydration" id="hydration" hidden>
+            <svg class="hydration-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path class="hydration-drop" d="M12 3.2 C12 3.2 5.5 10.4 5.5 14.6 A6.5 6.5 0 0 0 18.5 14.6 C18.5 10.4 12 3.2 12 3.2 Z"/>
+              <path class="hydration-shine" d="M9.2 15.2 A3 3 0 0 0 11.6 18"/>
+            </svg>
+            <span class="hydration-text" id="hydrationText"></span>
+            <button type="button" class="ov-btn ov-btn-water" id="drinkBtn" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 L10 17.5 L19 7.5"/></svg>
+              <span id="drinkLabel"></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="meta glass-chip">
+          <span class="cycle" id="cycle" hidden>
+            <span class="cycle-dots" id="cycleDots" aria-hidden="true"></span>
+            <span class="cycle-text" id="cycleText"></span>
+          </span>
+          <span class="clock tabular" id="clock">--:--</span>
+        </div>
+      </header>
+
+      <main class="stage" id="stage" aria-labelledby="breakTitle">
+        <div class="stage-inner" id="stageInner">
+          <div class="panel" id="panel">
+            <div class="ring-block">
+              <div class="ring-wrap is-empty" id="ringWrap">
+                <div class="halo halo-outer" aria-hidden="true"></div>
+                <div class="halo halo-inner" aria-hidden="true"></div>
+                <div class="disc" aria-hidden="true"></div>
+
+                <svg class="ring" id="ring" viewBox="0 0 200 200" aria-hidden="true">
+                  <circle class="ring-ticks" cx="100" cy="100" r="99" pathLength="60"/>
+                  <circle class="ring-track" cx="100" cy="100" r="92"/>
+                  <g transform="rotate(-90 100 100)">
+                    <circle class="ring-arc ring-arc-haze" cx="100" cy="100" r="92" pathLength="1"/>
+                    <circle class="ring-arc ring-arc-glow" cx="100" cy="100" r="92" pathLength="1"/>
+                    <circle class="ring-arc ring-arc-main" cx="100" cy="100" r="92" pathLength="1"/>
+                  </g>
+                </svg>
+                <div class="knob-rot" id="knob" aria-hidden="true"><span class="knob"></span></div>
+
+                <div class="ring-center">
+                  <div class="center-content" id="centerContent">
+                    <p class="break-title" id="breakTitle"></p>
+                    <div class="countdown tabular" id="countdown" role="timer" aria-atomic="true">00:00</div>
+                    <p class="break-subtitle" id="breakSubtitle"></p>
+                  </div>
+                  <div class="done-content" id="doneContent" aria-hidden="true">
+                    <svg class="done-icon" viewBox="0 0 64 64" aria-hidden="true">
+                      <path class="done-path done-check" pathLength="1" d="M17 33.5 L27.5 44 L47.5 22"/>
+                      <path class="done-path done-arrow" pathLength="1" d="M16 32 H46 M35 20 L47 32 L35 44"/>
+                      <path class="done-path done-pause" pathLength="1" d="M25 20 V44 M39 20 V44"/>
+                    </svg>
+                    <p class="done-title" id="doneTitle"></p>
+                    <p class="done-sub" id="doneSub"></p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="breath" id="breath" aria-hidden="true">
+                <span class="breath-dot"></span>
+                <span class="breath-labels">
+                  <span class="breath-label is-active" id="breathIn"></span>
+                  <span class="breath-label" id="breathOut"></span>
+                </span>
+              </div>
+            </div>
+
+            <div class="below" id="below">
+              <section class="grace" id="grace" hidden aria-labelledby="graceTitle">
+                <p class="grace-heading">
+                  <span class="grace-title" id="graceTitle"></span>
+                  <span class="grace-action" id="graceAction"></span>
+                </p>
+                <div class="grace-options" id="graceOptions"></div>
+                <p class="grace-hint"><kbd class="kbd">Esc</kbd><span id="graceHint"></span></p>
+                <div class="grace-progress" aria-hidden="true"><span class="grace-bar" id="graceBar"></span></div>
+              </section>
+
+              <section class="exercise" id="exercise" hidden>
+                <div class="exercise-stack" id="exerciseStack"></div>
+                <div class="exercise-progress" aria-hidden="true"><span class="exercise-bar" id="exerciseBar"></span></div>
+              </section>
+            </div>
+          </div>
+
+          <div class="dock" id="dock">
+            <!-- Pflicht-Pause: calm status chip, no way to end the break early (all displays) -->
+            <div class="glass-chip status-chip strict-chip" id="strictChip" hidden>
+              <span class="status-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2.5"/><path d="M8.5 10.5 V8 A3.5 3.5 0 0 1 15.5 8 V10.5"/></svg>
+              </span>
+              <span class="strict-name" id="strictName"></span>
+              <span class="chip-sep" aria-hidden="true">·</span>
+              <span class="tabular" id="strictEnds"></span>
+            </div>
+
+            <!-- flexible break (Pflicht-Pause off), primary display only -->
+            <div class="controls" id="controls" hidden>
+              <div class="snooze-group" id="snoozeGroup" role="group" aria-labelledby="snoozeLabel" hidden>
+                <span class="snooze-label">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="7.5"/><path d="M12 9.5 V13 L14.5 14.5 M9.5 2.8 H14.5"/></svg>
+                  <span id="snoozeLabel"></span>
+                </span>
+                <span class="snooze-options" id="snoozeOptions"></span>
+                <span class="snooze-left tabular" id="snoozeLeft"></span>
+              </div>
+
+              <button type="button" class="ov-btn ov-btn-hold" id="skipBtn" aria-describedby="skipHint" hidden>
+                <span class="hold-fill" aria-hidden="true"></span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 6.5 L11.5 12 L5.5 17.5 M12.5 6.5 L18.5 12 L12.5 17.5"/></svg>
+                <span class="hold-label" id="skipLabel"></span>
+              </button>
+            </div>
+            <p class="dock-hint" id="skipHint" hidden></p>
+
+            <!-- flexible break, secondary displays -->
+            <div class="glass-chip status-chip running" id="running" hidden>
+              <span class="running-dot" aria-hidden="true"></span>
+              <span id="runningLabel"></span>
+              <span class="chip-sep" aria-hidden="true">·</span>
+              <span class="tabular" id="runningEnds"></span>
+            </div>
+            <p class="glass-chip status-chip esc-hint" id="escHint" hidden><kbd class="kbd">Esc</kbd><span id="escHintText"></span></p>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div class="sr-only" id="live" aria-live="polite" aria-atomic="true"></div>
+  </div>
+
+  <!-- Static fallback (outside .app, so the entrance animation can never hide it): if the page fails to render
+       or overlay.js never runs, the tinted window still explains why the screen is locked. overlay.js localises
+       this text and hides the chip as soon as the real UI is up. -->
+  <p class="glass-chip lock-fallback" id="lockFallback">Pflicht-Pause – der Bildschirm wird nach Ablauf freigegeben</p>
+</body>
+</html>

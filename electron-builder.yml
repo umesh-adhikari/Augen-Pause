@@ -1,0 +1,248 @@
+# AugenPause – electron-builder 26 configuration
+# Schema: node_modules/app-builder-lib/scheme.json · Doku: docs/PACKAGING.md
+#
+#   npm run pack        → unpacked app only (dist/<platform>-unpacked), quick smoke test
+#   npm run dist:win    → Windows: NSIS installer (x64 + arm64) + portable exe (x64)
+#   npm run dist:mac    → macOS:   DMG + ZIP (universal)          – macOS host only
+#   npm run dist:linux  → Linux:   AppImage, deb, rpm, tar.gz      – Linux host (or CI) only
+#
+# Code signing / notarization are NOT configured here on purpose. Unsigned
+# builds must always succeed; signing is switched on purely via environment
+# variables (see docs/PACKAGING.md → "Code-Signing").
+
+appId: com.augenpause.app
+productName: AugenPause
+copyright: Copyright © 2026 AugenPause
+
+directories:
+  output: dist
+  buildResources: build
+
+# Only runtime files go into app.asar. electron-builder always adds package.json
+# and applies its default ignores (.git, lock files, *.d.ts, …).
+files:
+  - package.json
+  - src/**/*
+  - assets/icons/**/*
+  - "!scripts/**"
+  - "!docs/**"
+  - "!test/**"
+  - "!.github/**"
+  - "!**/*.map"
+
+asar: true
+compression: normal
+# No runtime npm dependencies → nothing to rebuild for the target Electron ABI.
+npmRebuild: false
+# Never upload anything from electron-builder itself (the optional CI workflow
+# attaches the files to a draft release). Also means no latest*.yml metadata.
+publish: null
+
+# Chromium UI resources: keep only the languages the app supports. Other system
+# languages fall back to en-US (same fallback as the app's own i18n).
+electronLanguages:
+  - de
+  - en-US
+  - en-GB
+
+# Hardening, see docs/ARCHITECTURE.md §7.
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  loadBrowserProcessSpecificV8Snapshot: false
+  grantFileProtocolExtraPrivileges: false
+  # Flipping fuses invalidates the ad-hoc signature of the macOS Electron binary.
+  # Unsigned mac builds (no certificate) would then be killed on Apple Silicon.
+  # This re-applies an ad-hoc signature right after flipping (macOS host only,
+  # skipped for non-.app paths). With a real certificate electron-builder signs
+  # again afterwards, so it is harmless there.
+  resetAdHocDarwinSignature: true
+
+# ---------------------------------------------------------------------------
+# Windows
+# ---------------------------------------------------------------------------
+win:
+  # Hand-tuned multi-size .ico (16–256 px, pixel-aligned small layers) from
+  # scripts/build-icons.js; also used for the NSIS installer/uninstaller icon.
+  icon: assets/icons/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+    - target: portable
+      arch:
+        - x64
+  requestedExecutionLevel: asInvoker
+  # Embeds icon, version info and copyright into the exe. Signing only happens
+  # if CSC_LINK / WIN_CSC_LINK or azureSignOptions are provided.
+  signAndEditExecutable: true
+
+nsis:
+  artifactName: ${productName}-Setup-${version}-${arch}.${ext}
+  # One installer per architecture instead of an additional combined x64+arm64
+  # installer (half the download size, clear file names).
+  buildUniversalInstaller: false
+  oneClick: false
+  # perMachine false + oneClick false → installer asks "only for me" (default,
+  # no admin rights) or "for all users" (elevates, allowElevation).
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AugenPause
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+  multiLanguageInstaller: true
+  # NSIS picks the Windows display language if it is in this list, otherwise
+  # the FIRST entry. English first → German Windows gets German, every other
+  # language gets English (same fallback as the app itself).
+  installerLanguages:
+    - en_US
+    - de_DE
+  license: LICENSE
+  # No auto-updater → no blockmap-friendly (worse compressed) payload needed.
+  differentialPackage: false
+  # Removes the autostart registry entry on a real uninstall (not on update).
+  include: build/installer.nsh
+  # installerIcon / uninstallerIcon omitted on purpose: NSIS then uses win.icon.
+
+portable:
+  artifactName: ${productName}-Portable-${version}.${ext}
+
+# ---------------------------------------------------------------------------
+# macOS
+# ---------------------------------------------------------------------------
+mac:
+  icon: assets/icons/icon.png
+  category: public.app-category.healthcare-fitness
+  # universal = one download for Intel and Apple Silicon (x64 + arm64 merged by
+  # @electron/universal; possible because there are no native modules).
+  target:
+    - target: dmg
+      arch:
+        - universal
+    - target: zip
+      arch:
+        - universal
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  darkModeSupport: true
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Notarization needs a Developer ID certificate (CSC_LINK / CSC_KEY_PASSWORD)
+  # plus APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID. Enable with
+  # `-c.mac.notarize=true` on the command line (see docs/PACKAGING.md).
+  notarize: false
+  extendInfo:
+    NSUserNotificationAlertStyle: alert
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  title: ${productName} ${version}
+  iconSize: 100
+  window:
+    width: 540
+    height: 380
+  contents:
+    - x: 140
+      y: 180
+      type: file
+    - x: 400
+      y: 180
+      type: link
+      path: /Applications
+
+# ---------------------------------------------------------------------------
+# Linux
+# ---------------------------------------------------------------------------
+# Resulting names (electron-builder maps ${arch} per format):
+#   AugenPause-1.0.0-x86_64.AppImage  AugenPause-1.0.0-arm64.AppImage
+#   AugenPause-1.0.0-amd64.deb        AugenPause-1.0.0-arm64.deb
+#   AugenPause-1.0.0-x86_64.rpm       AugenPause-1.0.0-x64.tar.gz
+linux:
+  icon: assets/icons/icon.png
+  target:
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+    - target: deb
+      arch:
+        - x64
+        - arm64
+    - target: rpm
+      arch:
+        - x64
+    - target: tar.gz
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  category: Utility
+  synopsis: Eye break and hydration reminder
+  # Package description AND the .desktop "Comment" (electron-builder always
+  # overwrites desktop.entry.Comment with this value).
+  description: Reminds you to rest your eyes and to drink enough water.
+  maintainer: AugenPause
+  vendor: AugenPause
+  # Widget always-on-top + positioning do not work under native Wayland → XWayland.
+  # Applies to the .desktop launchers (deb/rpm menu entry, AppImage desktop
+  # integration), NOT to starting the AppImage/binary directly from a shell.
+  executableArgs:
+    - --ozone-platform=x11
+  # .desktop file name = desktopName from package.json (augenpause.desktop),
+  # which is also the Wayland app_id Electron uses.
+  syncDesktopName: true
+  desktop:
+    entry:
+      Name: AugenPause
+      Comment: Reminds you to rest your eyes and to drink enough water.
+      "Comment[de]": Erinnert dich an Augenpausen und ans Trinken
+      # X11 WM_CLASS class of Electron windows = productName.
+      StartupWMClass: AugenPause
+      Keywords: eye;break;rest;health;hydration;water;reminder;Augen;Augenpause;Pause;Gesundheit;trinken;Wasser;Erinnerung;
+      X-GNOME-UsesNotifications: "true"
+
+deb:
+  packageCategory: utils
+  # electron-builder defaults (a custom list REPLACES them, so they are repeated
+  # here) + GTK 4 as alternative (like Chrome) + ALSA for the break chime +
+  # an AppIndicator library for the tray icon on GNOME-based desktops.
+  depends:
+    - libgtk-3-0 | libgtk-4-1
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - libasound2
+    - libayatana-appindicator3-1 | libappindicator3-1
+  # Default recommends (libappindicator3-1) is already covered by depends.
+  recommends: []
+
+rpm:
+  # electron-builder defaults + ALSA.
+  depends:
+    - gtk3
+    - libnotify
+    - nss
+    - libXScrnSaver
+    - (libXtst or libXtst6)
+    - xdg-utils
+    - at-spi2-core
+    - (libuuid or libuuid1)
+    - (alsa-lib or libasound2)
+  # AppIndicator only as weak dependency: dnf/zypper install it by default, but
+  # on RHEL/Rocky/Alma it lives in EPEL and must not block the installation.
+  fpm:
+    - --rpm-tag
+    - "Recommends: (libayatana-appindicator-gtk3 or libappindicator-gtk3 or libayatana-appindicator3-1 or libappindicator3-1)"

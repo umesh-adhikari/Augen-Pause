@@ -1,0 +1,128 @@
+/* AugenPause design tokens – shared by widget, dashboard and overlay. */
+
+:root {
+  color-scheme: dark;
+
+  /* typography – system fonts only (offline + strict CSP) */
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    system-ui, Ubuntu, Cantarell, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Display",
+    system-ui, Ubuntu, Cantarell, "Noto Sans", sans-serif;
+  --font-mono: "Cascadia Mono", "SF Mono", ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --text-xs: 11px;
+  --text-sm: 12.5px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 28px;
+  --text-3xl: 40px;
+  --text-hero: 88px;
+
+  /* spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* radii */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 26px;
+  --radius-pill: 999px;
+
+  /* motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-med: 220ms;
+  --dur-slow: 420ms;
+
+  /* semantic state colors (theme independent) */
+  --c-warning: #fbbf24;
+  --c-warning-soft: rgba(251, 191, 36, 0.16);
+  --c-break: #34d399;
+  --c-break-2: #2dd4bf;
+  --c-break-soft: rgba(52, 211, 153, 0.16);
+  --c-paused: #94a3b8;
+  --c-paused-soft: rgba(148, 163, 184, 0.16);
+  --c-water: #38bdf8;
+  --c-water-2: #60a5fa;
+  --c-water-soft: rgba(56, 189, 248, 0.16);
+  --c-danger: #f87171;
+  --c-danger-soft: rgba(248, 113, 113, 0.14);
+
+  /* accent (overridden by data-accent) */
+  --accent: #2dd4bf;
+  --accent-2: #22d3ee;
+  --accent-contrast: #04201d;
+  --accent-soft: rgba(45, 212, 191, 0.16);
+  --accent-glow: rgba(45, 212, 191, 0.45);
+
+  /* dark theme (default) */
+  --bg: #0b1020;
+  --bg-elevated: #111830;
+  --bg-gradient: radial-gradient(1200px 700px at 10% -10%, rgba(45, 212, 191, 0.10), transparent 60%),
+    radial-gradient(900px 600px at 110% 10%, rgba(139, 92, 246, 0.10), transparent 60%),
+    linear-gradient(180deg, #0b1020 0%, #0a0f1d 100%);
+  --surface: rgba(255, 255, 255, 0.045);
+  --surface-2: rgba(255, 255, 255, 0.075);
+  --surface-3: rgba(255, 255, 255, 0.11);
+  --surface-solid: #151c33;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text: #e8ecf6;
+  --text-muted: #9aa4bf;
+  --text-faint: #6b7592;
+  --track: rgba(255, 255, 255, 0.08);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
+  --glass: rgba(17, 24, 48, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.10);
+  --focus-ring: 0 0 0 3px var(--accent-soft), 0 0 0 1px var(--accent);
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f6fb;
+  --bg-elevated: #ffffff;
+  --bg-gradient: radial-gradient(1200px 700px at 10% -10%, rgba(20, 184, 166, 0.10), transparent 60%),
+    radial-gradient(900px 600px at 110% 10%, rgba(139, 92, 246, 0.08), transparent 60%),
+    linear-gradient(180deg, #f6f8fc 0%, #eef2f8 100%);
+  --surface: rgba(15, 23, 42, 0.035);
+  --surface-2: rgba(15, 23, 42, 0.06);
+  --surface-3: rgba(15, 23, 42, 0.09);
+  --surface-solid: #ffffff;
+  --border: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.16);
+  --text: #0f172a;
+  --text-muted: #516079;
+  --text-faint: #8391a8;
+  --track: rgba(15, 23, 42, 0.08);
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.10);
+  --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.16);
+  --glass: rgba(255, 255, 255, 0.78);
+  --glass-border: rgba(15, 23, 42, 0.08);
+}
+
+/* accents */
+html[data-accent="teal"]   { --accent: #2dd4bf; --accent-2: #22d3ee; --accent-contrast: #04201d; --accent-soft: rgba(45, 212, 191, 0.16); --accent-glow: rgba(45, 212, 191, 0.45); }
+html[data-accent="violet"] { --accent: #a78bfa; --accent-2: #c084fc; --accent-contrast: #1a1033; --accent-soft: rgba(167, 139, 250, 0.18); --accent-glow: rgba(167, 139, 250, 0.45); }
+html[data-accent="blue"]   { --accent: #60a5fa; --accent-2: #818cf8; --accent-contrast: #0b1a33; --accent-soft: rgba(96, 165, 250, 0.18); --accent-glow: rgba(96, 165, 250, 0.45); }
+html[data-accent="green"]  { --accent: #4ade80; --accent-2: #a3e635; --accent-contrast: #062012; --accent-soft: rgba(74, 222, 128, 0.16); --accent-glow: rgba(74, 222, 128, 0.40); }
+html[data-accent="orange"] { --accent: #fb923c; --accent-2: #fbbf24; --accent-contrast: #2a1204; --accent-soft: rgba(251, 146, 60, 0.18); --accent-glow: rgba(251, 146, 60, 0.45); }
+html[data-accent="pink"]   { --accent: #f472b6; --accent-2: #fb7185; --accent-contrast: #2a0718; --accent-soft: rgba(244, 114, 182, 0.18); --accent-glow: rgba(244, 114, 182, 0.45); }
+
+/* light theme needs slightly deeper accents for contrast on white */
+html[data-theme="light"][data-accent="teal"]   { --accent: #0d9488; --accent-2: #0891b2; --accent-contrast: #ffffff; }
+html[data-theme="light"][data-accent="violet"] { --accent: #7c3aed; --accent-2: #9333ea; --accent-contrast: #ffffff; }
+html[data-theme="light"][data-accent="blue"]   { --accent: #2563eb; --accent-2: #4f46e5; --accent-contrast: #ffffff; }
+html[data-theme="light"][data-accent="green"]  { --accent: #16a34a; --accent-2: #65a30d; --accent-contrast: #ffffff; }
+html[data-theme="light"][data-accent="orange"] { --accent: #ea580c; --accent-2: #d97706; --accent-contrast: #ffffff; }
+html[data-theme="light"][data-accent="pink"]   { --accent: #db2777; --accent-2: #e11d48; --accent-contrast: #ffffff; }

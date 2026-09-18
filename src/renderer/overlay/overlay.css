@@ -1,0 +1,1237 @@
+/* AugenPause – break screen (fullscreen, TRANSPARENT window, always dark UI).
+   The window itself is transparent: a dark tint (settings.breaks.overlayOpacity, 0.2..1) lies over the desktop,
+   all content sits on dark glass surfaces so it stays legible over any desktop (bright editor or dark terminal).
+   No backdrop-filter (it cannot blur the desktop behind a window).
+   Performance rules: only transform / opacity are animated continuously (CSS animations),
+   the ring advances via stroke-dashoffset once per second with a linear 1 s transition,
+   the aurora uses pre-soft radial gradients (never an animated blur). */
+
+html {
+  background: transparent;
+  overflow: hidden;
+}
+
+/* THE TINT LIVES HERE – on <body>, never inside .app.
+   .app fades in (entrance) and a broken page could leave it at opacity 0 forever, so the lock tint must not
+   depend on it: --overlay-alpha already has its 0.6 default in CSS, so the window looks like a lock screen
+   from the very first paint, even if overlay.js never runs. --tint-alpha clamps it to the 0.2 floor that keeps
+   every pixel non-transparent (so the window still captures all mouse input, §11). */
+body {
+  height: 100vh;
+  overflow: hidden;
+  background-color: rgba(11, 16, 32, var(--tint-alpha));
+  color: var(--ov-text);
+  -webkit-user-drag: none;
+  transition: background-color 450ms ease;
+  animation: tint-in 520ms ease;
+}
+/* soft entrance: starts at the input-capturing floor instead of at full tint (never fully transparent) */
+@keyframes tint-in { from { background-color: rgba(11, 16, 32, 0.2); } }
+/* release: the tint eases back towards the floor while "done" shows, so the window never ends on a hard dark cut */
+html.is-done body {
+  background-color: rgba(11, 16, 32, max(0.2, calc(var(--tint-alpha) * 0.55)));
+  transition: background-color 1200ms ease 250ms;
+}
+
+[hidden] { display: none !important; }
+
+html {
+  --overlay-alpha: 0.6; /* set live from settings.breaks.overlayOpacity (clamped 0.2..1) */
+  --tint-alpha: max(0.2, var(--overlay-alpha, 0.6)); /* hard floor – see body above */
+  /* glass surfaces get denser when the tint is light, so contrast stays constant over bright desktops */
+  --glass-alpha: calc(0.94 - 0.2 * var(--tint-alpha));
+  --glass-bg: rgba(11, 16, 32, var(--glass-alpha));
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-outline: 0 0 0 1px rgba(2, 4, 10, 0.32);
+
+  --ring-size: min(42vmin, 420px);
+  --ring-1: var(--c-break);
+  --ring-2: var(--c-break-2);
+  --ring-ink: #03211b;
+  --aur-a: #10b9a0;
+  --aur-b: #6d3fe0;
+  --aur-c: #0b84d0;
+
+  --ov-text: #eef2fb;
+  --ov-muted: #b3bcd2;
+  --ov-faint: #7f8aa6;
+  --glass-fill: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+  --glass-line: rgba(255, 255, 255, 0.085);
+  --glass-hi: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  --gutter: clamp(20px, 3.2vmin, 44px);
+  --panel-pad-x: clamp(20px, 3.6vmin, 44px);
+  --panel-pad-y: clamp(20px, 3.4vmin, 40px);
+  --panel-radius: clamp(28px, 4vmin, 44px);
+  --below-width: min(620px, calc(100vw - 2 * var(--gutter) - 2 * var(--panel-pad-x)));
+  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-sine: cubic-bezier(0.37, 0, 0.63, 1);
+  --breath-delay: 0ms;
+}
+
+html[data-break="long"] {
+  --ring-1: #a78bfa;
+  --ring-2: var(--accent);
+  --ring-ink: #120b2b;
+  --aur-a: #7c4dff;
+  --aur-b: #0fa39a;
+  --aur-c: #4f46e5;
+}
+html[data-break="long"][data-accent="violet"],
+html[data-break="long"][data-accent="pink"] { --ring-2: #2dd4bf; }
+
+/* ---------- SVG paint servers ---------- */
+.svg-defs { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+.stop-ring-1 { stop-color: var(--ring-1); }
+.stop-ring-2 { stop-color: var(--ring-2); }
+.stop-water-1 { stop-color: #7dd3fc; }
+.stop-water-2 { stop-color: var(--c-water-2); }
+
+/* ---------- app shell + entrance (content only – the body tint is already there) ---------- */
+.app {
+  position: fixed;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 700ms ease;
+}
+.app.is-ready { opacity: 1; }
+
+/* Always-present explanation of the lock. Sits OUTSIDE .app, so it stays readable even if the page never
+   became ready (broken render, failed module load): a dark screen that swallows input must explain itself.
+   overlay.js hides it as soon as the real UI rendered. */
+.glass-chip.lock-fallback {
+  position: fixed;
+  top: var(--gutter);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  height: auto;
+  min-height: 44px;
+  max-width: min(620px, calc(100vw - 2 * var(--gutter)));
+  margin: 0;
+  padding: 11px 20px;
+  text-align: center;
+  white-space: normal;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--ov-text);
+}
+
+/* ---------- backdrop: a very soft aurora over the body tint ---------- */
+.backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  contain: strict;
+  transition: opacity 1100ms ease;
+}
+
+.aurora {
+  position: absolute;
+  inset: 0;
+  /* subtle: the desktop must stay visible; a little stronger when the tint is dense */
+  opacity: calc(0.18 + 0.42 * var(--tint-alpha));
+  transition: opacity 450ms ease;
+}
+
+.blob {
+  position: absolute;
+  width: 64vmax;
+  height: 64vmax;
+  border-radius: 50%;
+  will-change: transform;
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--blob) 46%, transparent) 0%,
+    color-mix(in srgb, var(--blob) 26%, transparent) 36%,
+    color-mix(in srgb, var(--blob) 9%, transparent) 66%,
+    transparent 100%);
+}
+.blob-a { --blob: var(--aur-a); left: -20vmax; top: -28vmax; opacity: 0.8; animation: drift-a 48s var(--ease-sine) infinite alternate; }
+.blob-b { --blob: var(--aur-b); right: -22vmax; bottom: -30vmax; opacity: 0.72; animation: drift-b 62s var(--ease-sine) infinite alternate; }
+.blob-c { --blob: var(--aur-c); left: 18vw; bottom: -40vmax; width: 58vmax; height: 58vmax; opacity: 0.5; animation: drift-c 54s var(--ease-sine) infinite alternate; }
+
+@keyframes drift-a {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(9vmax, 6vmax, 0) scale(1.12); }
+  100% { transform: translate3d(3vmax, 12vmax, 0) scale(0.96); }
+}
+@keyframes drift-b {
+  0%   { transform: translate3d(0, 0, 0) scale(1.05); }
+  50%  { transform: translate3d(-10vmax, -5vmax, 0) scale(0.94); }
+  100% { transform: translate3d(-4vmax, -12vmax, 0) scale(1.1); }
+}
+@keyframes drift-c {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(12vmax, -6vmax, 0) scale(1.16); }
+  100% { transform: translate3d(-8vmax, -2vmax, 0) scale(1.02); }
+}
+
+.vignette {
+  position: absolute;
+  inset: 0;
+  opacity: calc(0.35 + 0.65 * var(--tint-alpha));
+  background: radial-gradient(125% 100% at 50% 48%, transparent 48%, rgba(3, 5, 12, 0.42) 100%);
+  transition: opacity 450ms ease;
+}
+
+/* ---------- layout ---------- */
+.layout {
+  position: relative;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* dark glass chip (top bar + dock) */
+.glass-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.01)),
+    var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    var(--glass-outline),
+    0 14px 34px -16px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  padding: var(--gutter) var(--gutter) 0;
+  min-height: calc(var(--gutter) + 44px);
+}
+
+.brand {
+  justify-self: start;
+  padding: 0 18px 0 8px;
+}
+.brand-mark { width: 30px; height: 30px; flex: none; }
+.mark-track { fill: none; stroke: rgba(255, 255, 255, 0.12); stroke-width: 2.4; }
+.mark-arc { fill: none; stroke: url(#mark-grad); stroke-width: 2.6; stroke-linecap: round; }
+.mark-eye { fill: none; stroke: var(--ov-text); stroke-width: 1.8; stroke-linejoin: round; opacity: 0.9; }
+.mark-pupil { fill: url(#mark-grad); }
+.brand-name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ov-text);
+}
+
+.topbar-center { justify-self: center; min-width: 0; }
+
+.meta {
+  justify-self: end;
+  gap: 14px;
+  max-width: 100%;
+  padding: 0 18px;
+}
+.clock {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--ov-text);
+}
+.cycle:not([hidden]) + .clock {
+  padding-left: 14px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  line-height: 20px;
+}
+.cycle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--ov-muted);
+}
+.cycle-text { overflow: hidden; text-overflow: ellipsis; }
+.cycle-dots { display: flex; align-items: center; gap: 4px; flex: none; }
+.cycle-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+.cycle-dot.is-long { width: 13px; }
+.cycle-dot.is-done { background: color-mix(in oklab, var(--ring-1) 55%, rgba(255, 255, 255, 0.1)); }
+.cycle-dot.is-current {
+  background: var(--ring-1);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring-1) 22%, transparent);
+}
+
+/* ---------- stage ---------- */
+.stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  /* the extra bottom padding balances the top bar, so the panel sits optically centred */
+  padding: 8px var(--gutter) calc(var(--gutter) + 20px);
+}
+
+.stage-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(12px, 2.2vh, 22px);
+}
+
+/* the glass panel carrying ring, texts and the exercise / grace card */
+.panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(14px, 2.8vh, 32px);
+  padding: var(--panel-pad-y) var(--panel-pad-x);
+  border-radius: var(--panel-radius);
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    radial-gradient(90% 55% at 50% 0%, color-mix(in oklab, var(--ring-1) 8%, transparent), transparent 72%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0) 38%),
+    var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    var(--glass-outline),
+    0 50px 120px -40px rgba(0, 0, 0, 0.7),
+    0 16px 40px -20px rgba(0, 0, 0, 0.5);
+  transform: translateY(14px) scale(0.985);
+  transition: transform 1100ms var(--ease-soft);
+}
+.is-ready .panel { transform: none; }
+
+.ring-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(12px, 2.4vh, 24px);
+  transition: transform 900ms var(--ease-soft);
+}
+
+.ring-wrap {
+  position: relative;
+  width: var(--ring-size);
+  height: var(--ring-size);
+  transform: scale(0.94);
+  transition: transform 1200ms var(--ease-soft);
+  --tick-ms: 1000ms;
+  --tick-ease: linear;
+}
+.is-ready .ring-wrap { transform: scale(1); }
+
+/* breathing halo (pre-soft radial gradients, animated by transform/opacity only) */
+.halo {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.halo-inner {
+  inset: -15%;
+  opacity: 0.7;
+  background: radial-gradient(closest-side,
+    transparent 50%,
+    color-mix(in oklab, var(--ring-1) 17%, transparent) 69%,
+    color-mix(in oklab, var(--ring-2) 7%, transparent) 83%,
+    transparent 100%);
+}
+.halo-outer {
+  inset: -30%;
+  opacity: 0.55;
+  background: radial-gradient(closest-side,
+    color-mix(in oklab, var(--ring-1) 9%, transparent) 30%,
+    color-mix(in oklab, var(--ring-2) 5%, transparent) 58%,
+    transparent 100%);
+}
+
+.is-breathing .halo-inner { animation: breathe-inner 8s ease-in-out var(--breath-delay) infinite; }
+.is-breathing .halo-outer { animation: breathe-outer 8s ease-in-out var(--breath-delay) infinite; }
+
+@keyframes breathe-inner {
+  0%, 100% { transform: scale(0.94); opacity: 0.4; }
+  50%      { transform: scale(1.05); opacity: 1; }
+}
+@keyframes breathe-outer {
+  0%, 100% { transform: scale(0.9); opacity: 0.35; }
+  50%      { transform: scale(1.06); opacity: 0.85; }
+}
+
+.disc {
+  position: absolute;
+  inset: 9.5%;
+  border-radius: 50%;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0) 60%),
+    rgba(5, 8, 18, 0.34);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 30px 80px -30px rgba(0, 0, 0, 0.55);
+}
+
+.ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.ring-ticks {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: 0.85;
+  stroke-linecap: round;
+  stroke-dasharray: 0 1;
+}
+.ring-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 3.4;
+}
+.ring-arc {
+  fill: none;
+  stroke: url(#ring-grad);
+  stroke-linecap: round;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset var(--tick-ms) var(--tick-ease), opacity 500ms ease;
+}
+.ring-arc-main { stroke-width: 4.4; }
+.ring-arc-glow { stroke-width: 9; opacity: 0.16; }
+.ring-arc-haze { stroke-width: 17; opacity: 0.055; }
+.ring-wrap.is-empty .ring-arc { opacity: 0 !important; }
+
+.knob-rot {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  will-change: transform;
+  transition: transform var(--tick-ms) var(--tick-ease), opacity 500ms ease;
+}
+.knob {
+  position: absolute;
+  left: 50%;
+  top: 4%;
+  width: clamp(9px, calc(var(--ring-size) * 0.03), 13px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: #ffffff;
+  box-shadow:
+    0 0 0 3px color-mix(in oklab, var(--ring-2) 35%, transparent),
+    0 0 18px 3px color-mix(in oklab, var(--ring-2) 55%, transparent);
+}
+.ring-wrap.is-empty .knob-rot { opacity: 0 !important; }
+
+/* ring centre */
+.ring-center {
+  position: absolute;
+  inset: 13%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+.center-content,
+.done-content {
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: opacity 500ms ease, transform 800ms var(--ease-soft);
+}
+
+.break-title {
+  font-size: clamp(12px, 1.55vmin, 15px);
+  font-weight: 650;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--ring-1) 72%, white);
+}
+.countdown {
+  margin: 0.1em 0 0.14em;
+  font-family: var(--font-display);
+  font-size: clamp(56px, 9vmin, 120px);
+  font-weight: 250;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: #f6f8fe;
+  text-shadow: 0 0 40px color-mix(in oklab, var(--ring-1) 18%, transparent);
+}
+.break-subtitle {
+  max-width: calc(var(--ring-size) * 0.58);
+  font-size: clamp(13px, 1.6vmin, 16px);
+  line-height: 1.42;
+  color: var(--ov-muted);
+  text-wrap: balance;
+}
+
+/* breathing guide */
+.breath {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ov-muted);
+  transition: opacity 500ms ease;
+}
+.breath-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ring-1);
+  opacity: 0.7;
+  box-shadow: 0 0 12px 2px color-mix(in oklab, var(--ring-1) 45%, transparent);
+}
+.is-breathing .breath-dot { animation: breathe-dot 8s ease-in-out var(--breath-delay) infinite; }
+@keyframes breathe-dot {
+  0%, 100% { transform: scale(0.6); opacity: 0.45; }
+  50%      { transform: scale(1.3); opacity: 1; }
+}
+.breath-labels { display: grid; justify-items: start; }
+.breath-label {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 1000ms ease, transform 1000ms var(--ease-soft);
+}
+.breath-label.is-active { opacity: 1; transform: none; }
+
+/* ---------- below the ring (inside the panel): grace card / exercise card ---------- */
+.below {
+  display: grid;
+  width: var(--below-width);
+  transition: opacity 500ms ease;
+}
+.below > section { grid-area: 1 / 1; }
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* grace period (Pflicht-Pause off only) – calm but unmistakable */
+.grace {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 24px 22px;
+  border-radius: 26px;
+  overflow: hidden;
+  background:
+    radial-gradient(80% 120% at 50% 0%, color-mix(in oklab, var(--ring-1) 11%, transparent), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.035));
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 0 4px color-mix(in oklab, var(--ring-1) 6%, transparent);
+  animation: rise-in 800ms var(--ease-soft) 150ms both;
+}
+.grace-heading {
+  font-size: clamp(17px, 2.3vmin, 21px);
+  line-height: 1.3;
+  text-align: center;
+  text-wrap: balance;
+}
+.grace-title { font-family: var(--font-display); font-weight: 600; color: var(--ov-text); }
+.grace-action { margin-left: 0.3em; color: var(--ov-muted); }
+.grace-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+.grace-hint,
+.esc-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ov-muted);
+}
+.grace-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.grace-bar,
+.exercise-bar {
+  display: block;
+  height: 100%;
+  transform: scaleX(0);
+  transition: transform var(--bar-ms, 0ms) linear var(--bar-delay, 0ms);
+  background: linear-gradient(90deg, var(--ring-1), var(--ring-2));
+}
+.grace-bar { transform-origin: center; opacity: 0.85; }
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-bottom-width: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--ov-text);
+}
+
+/* exercise card (an inner surface of the panel) */
+.exercise {
+  position: relative;
+  padding: 16px 24px 18px 16px;
+  border-radius: 24px;
+  overflow: hidden;
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-line);
+  box-shadow: var(--glass-hi);
+  animation: rise-in 900ms var(--ease-soft) 200ms both;
+}
+.exercise-stack { display: grid; }
+.ex-slide {
+  grid-area: 1 / 1;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+  animation: ex-in 900ms var(--ease-soft) 120ms both;
+}
+.ex-slide.no-anim { animation: none; }
+.ex-slide.is-leaving { animation: ex-out 520ms ease both; pointer-events: none; }
+@keyframes ex-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes ex-out {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(-8px); }
+}
+.ex-art {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 88px;
+  height: 88px;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in oklab, var(--ring-1) 13%, transparent), transparent 70%),
+    rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ex-art .il { width: 78px; height: 78px; }
+.ex-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ex-kicker {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--ring-1) 70%, white);
+}
+.ex-count { color: var(--ov-faint); letter-spacing: 0.08em; }
+.ex-title {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--ov-text);
+}
+.ex-text { font-size: 14px; line-height: 1.42; color: var(--ov-muted); }
+.exercise-progress {
+  position: absolute;
+  left: 26px;
+  right: 26px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+}
+.exercise-bar { transform-origin: left center; opacity: 0.7; }
+
+/* ---------- buttons ---------- */
+.ov-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ov-text);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+  cursor: pointer;
+  overflow: hidden;
+  isolation: isolate;
+  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease, opacity 200ms ease, box-shadow 200ms ease;
+}
+.ov-btn:hover { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.18); }
+.ov-btn:active { transform: scale(0.97); }
+.ov-btn:disabled { opacity: 0.5; cursor: default; transform: none; }
+.ov-btn:focus-visible {
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px #0b1020, 0 0 0 4px color-mix(in oklab, var(--ring-1) 85%, white);
+}
+.ov-btn svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ov-btn-big {
+  height: 54px;
+  min-width: 118px;
+  padding: 0 24px;
+  font-size: 16px;
+  background: rgba(255, 255, 255, 0.085);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+.ov-btn-big.is-default {
+  color: var(--ring-ink);
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--ring-1), var(--ring-2));
+  box-shadow: 0 12px 32px -14px color-mix(in oklab, var(--ring-1) 80%, transparent);
+}
+.ov-btn-big.is-default:hover { background: linear-gradient(135deg, var(--ring-1), var(--ring-2)); border-color: transparent; filter: brightness(1.06); }
+
+.ov-btn-chip {
+  height: 40px;
+  padding: 0 16px;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: transparent;
+}
+
+.ov-btn-water {
+  height: 32px;
+  padding: 0 14px 0 11px;
+  gap: 6px;
+  font-size: 13px;
+  color: #e3f6ff;
+  border-color: transparent;
+  background: rgba(56, 189, 248, 0.26);
+}
+.ov-btn-water:hover { background: rgba(56, 189, 248, 0.36); border-color: transparent; }
+.ov-btn-water svg { width: 15px; height: 15px; stroke-width: 2.4; }
+
+/* hold to skip (dock → own glass base, it floats over the desktop) */
+.ov-btn-hold {
+  height: 50px;
+  padding: 0 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03)),
+    var(--glass-bg);
+  border-color: var(--glass-border);
+  box-shadow: var(--glass-outline), 0 14px 34px -16px rgba(0, 0, 0, 0.6);
+}
+.ov-btn-hold:hover {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.06)),
+    var(--glass-bg);
+}
+.ov-btn-hold:focus-visible { box-shadow: 0 0 0 2px #0b1020, 0 0 0 4px color-mix(in oklab, var(--ring-1) 85%, white); }
+.hold-fill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: linear-gradient(90deg,
+    color-mix(in oklab, var(--ring-1) 30%, transparent),
+    color-mix(in oklab, var(--ring-2) 52%, transparent));
+  transition: transform 280ms var(--ease-soft);
+}
+.ov-btn-hold.is-holding { border-color: color-mix(in oklab, var(--ring-1) 45%, transparent); }
+.ov-btn-hold.is-holding .hold-fill { transform: scaleX(1); transition: transform var(--hold-ms, 3000ms) linear; }
+.ov-btn-hold.is-complete .hold-fill { transform: scaleX(1); transition: none; }
+
+/* ---------- topbar hydration chip ---------- */
+.hydration {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 18px 0 14px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #dff3ff;
+  background:
+    linear-gradient(180deg, rgba(56, 189, 248, 0.2), rgba(56, 189, 248, 0.09)),
+    var(--glass-bg);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  box-shadow: var(--glass-outline), 0 16px 40px -22px rgba(56, 189, 248, 0.55);
+  animation: rise-in 800ms var(--ease-soft) 300ms both;
+  white-space: nowrap;
+}
+.hydration.has-action { padding-right: 6px; }
+.hydration-icon { width: 20px; height: 20px; flex: none; }
+.hydration-drop { fill: var(--c-water); }
+.hydration-shine { fill: none; stroke: rgba(255, 255, 255, 0.8); stroke-width: 1.4; stroke-linecap: round; }
+.hydration.is-ack .hydration-drop { fill: var(--c-break); }
+
+/* ---------- dock (right under the panel) ---------- */
+.dock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  transition: opacity 500ms ease;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.snooze-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 50px;
+  padding: 4px 6px 4px 16px;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.01)),
+    var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-outline), 0 14px 34px -16px rgba(0, 0, 0, 0.6);
+}
+.snooze-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ov-muted);
+  white-space: nowrap;
+}
+.snooze-label svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.snooze-options { display: flex; gap: 4px; }
+.snooze-left {
+  padding: 0 10px 0 6px;
+  font-size: 12.5px;
+  color: var(--ov-faint);
+  white-space: nowrap;
+}
+
+/* status chips (Pflicht-Pause, running break on secondary displays, Esc hint) */
+.status-chip {
+  height: 46px;
+  padding: 0 20px 0 8px;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ov-muted);
+}
+.status-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  color: color-mix(in oklab, var(--ring-1) 78%, white);
+  background: color-mix(in oklab, var(--ring-1) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ring-1) 24%, transparent);
+}
+.status-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.strict-name { font-weight: 650; color: var(--ov-text); }
+.chip-sep { color: var(--ov-faint); }
+.status-chip .tabular { color: var(--ov-text); }
+
+.running { padding-left: 18px; }
+.running-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ring-1);
+  animation: soft-pulse 2.4s ease-in-out infinite;
+}
+@keyframes soft-pulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.85); }
+  50%      { opacity: 1; transform: scale(1.1); }
+}
+.esc-hint.status-chip { height: 40px; padding: 0 16px 0 10px; font-size: 13px; }
+
+.dock-hint {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+  color: var(--ov-muted);
+  background: var(--glass-bg);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: var(--glass-outline);
+}
+
+/* ---------- done / ended states ---------- */
+.done-content { opacity: 0; transform: scale(0.94); }
+.done-icon {
+  width: clamp(44px, calc(var(--ring-size) * 0.19), 76px);
+  height: clamp(44px, calc(var(--ring-size) * 0.19), 76px);
+}
+.done-path {
+  display: none;
+  fill: none;
+  stroke: var(--ov-text);
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+}
+.done-check { stroke: var(--ring-1); }
+.done-title {
+  max-width: calc(var(--ring-size) * 0.66);
+  margin-top: clamp(8px, 1.4vmin, 16px);
+  font-family: var(--font-display);
+  font-size: clamp(19px, 2.7vmin, 28px);
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--ov-text);
+  text-wrap: balance;
+}
+.done-sub {
+  max-width: calc(var(--ring-size) * 0.6);
+  margin-top: 6px;
+  font-size: clamp(13px, 1.55vmin, 15px);
+  color: var(--ov-muted);
+  text-wrap: balance;
+}
+
+.is-done .center-content { opacity: 0; transform: scale(0.96); }
+.is-done .done-content { opacity: 1; transform: none; transition-delay: 160ms; }
+.done-completed .done-check,
+.done-ended .done-arrow,
+.done-snoozed .done-arrow,
+.done-meeting .done-pause { display: block; animation: draw 750ms var(--ease-soft) 300ms forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+
+.is-done .breath,
+.is-done .below,
+.is-done .dock,
+.is-done .topbar-center { opacity: 0; pointer-events: none; transition: opacity 450ms ease; }
+.is-done .knob-rot { opacity: 0; }
+.is-done .ring-block { transform: translateY(var(--done-shift, 0px)); transition-delay: 80ms; }
+/* release: the aurora clears while "done" shows (the body tint eases back at the same time) */
+.is-done .backdrop { opacity: 0.45; transition: opacity 1200ms ease 250ms; }
+.done-completed .ring-arc-glow { opacity: 0.3; }
+.done-completed .ring-arc-haze { opacity: 0.1; }
+.done-completed .halo-inner { animation: bloom 1500ms var(--ease-soft) both; }
+.is-done:not(.done-completed) .ring-arc-main { opacity: 0.32; }
+.is-done:not(.done-completed) .ring-arc-glow,
+.is-done:not(.done-completed) .ring-arc-haze { opacity: 0; }
+.is-done:not(.done-completed) .halo { opacity: 0.25; transition: opacity 600ms ease; }
+@keyframes bloom {
+  0%   { transform: scale(1); opacity: 0.9; }
+  45%  { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1.18); opacity: 0.35; }
+}
+
+/* ---------- exercise illustrations (viewBox 120) ---------- */
+.il { overflow: visible; }
+.il * { transform-box: view-box; }
+.il-line { fill: none; stroke: rgba(236, 241, 252, 0.86); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.il-soft { fill: none; stroke: rgba(236, 241, 252, 0.3); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.il-accent { fill: none; stroke: url(#il-grad); stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; }
+.il-fill-accent { fill: url(#il-grad); stroke: none; }
+.il-glow { fill: var(--ring-1); stroke: none; opacity: 0.14; }
+.il-cover.il-accent { fill: #121a31; }
+.il-dash { stroke-dasharray: 2.5 5; }
+
+@keyframes il-pulse {
+  0%, 100% { transform: scale(0.86); opacity: 0.08; }
+  50%      { transform: scale(1.12); opacity: 0.22; }
+}
+
+/* 20-20-20 */
+.il-far .far-glow { transform-origin: 90px 32px; animation: il-pulse 4.5s ease-in-out infinite; }
+.il-far .far-dot { animation: far-dot 3.4s var(--ease-sine) infinite; }
+.il-far .far-eye { animation: far-eye 6s ease-in-out infinite; }
+@keyframes far-dot {
+  0%       { transform: translate(0, 0); opacity: 0; }
+  15%      { opacity: 1; }
+  70%      { opacity: 1; }
+  85%, 100% { transform: translate(28px, -18.2px); opacity: 0; }
+}
+@keyframes far-eye {
+  0%, 100% { transform: translate(0, 0); }
+  50%      { transform: translate(1.2px, -0.8px); }
+}
+
+/* blink */
+.il-blink .blink-eye { transform-origin: 60px 60px; animation: blink-eye 3.6s ease-in-out infinite; }
+.il-blink .blink-lashes { opacity: 0; animation: blink-lashes 3.6s ease-in-out infinite; }
+@keyframes blink-eye {
+  0%, 58%, 100% { transform: scaleY(1); opacity: 1; }
+  68%, 80%      { transform: scaleY(0.06); opacity: 0; }
+  92%           { transform: scaleY(1); opacity: 1; }
+}
+@keyframes blink-lashes {
+  0%, 60%, 92%, 100% { opacity: 0; }
+  68%, 80%           { opacity: 1; }
+}
+
+/* eye circles */
+.il-roll .roll-orbit { transform-origin: 60px 60px; animation: roll 9s var(--ease-in-out) infinite; }
+@keyframes roll {
+  0%       { transform: rotate(0deg); }
+  45%, 50% { transform: rotate(720deg); }
+  95%, 100% { transform: rotate(0deg); }
+}
+
+/* near–far */
+.il-nearfar .nf-focus { transform-origin: 34px 80px; animation: nf-focus 6s var(--ease-in-out) infinite; }
+.il-nearfar .nf-near { animation: nf-near 6s ease-in-out infinite; }
+.il-nearfar .nf-far { animation: nf-far 6s ease-in-out infinite; }
+@keyframes nf-focus {
+  0%, 32%  { transform: translate(0, 0) scale(1); }
+  50%, 82% { transform: translate(52px, -47px) scale(0.78); }
+  100%     { transform: translate(0, 0) scale(1); }
+}
+@keyframes nf-near {
+  0%, 32%, 100% { opacity: 1; }
+  50%, 82%      { opacity: 0.32; }
+}
+@keyframes nf-far {
+  0%, 32%, 100% { opacity: 0.32; }
+  50%, 82%      { opacity: 1; }
+}
+
+/* palming */
+.il-palming .pm-glow { transform-origin: 60px 58px; animation: il-pulse 6s ease-in-out infinite; }
+.il-palming .pm-hand-l { animation: pm-hand-l 6s var(--ease-in-out) infinite; }
+.il-palming .pm-hand-r { animation: pm-hand-r 6s var(--ease-in-out) infinite; }
+.il-palming .pm-wisp { opacity: 0; animation: pm-wisp 3s ease-out infinite; }
+.il-palming .pm-wisp-2 { animation-delay: 0.7s; }
+.il-palming .pm-wisp-3 { animation-delay: 1.4s; }
+@keyframes pm-hand-l {
+  0%, 100% { transform: translate(-12px, 16px); opacity: 0.15; }
+  22%, 82% { transform: translate(0, 0); opacity: 1; }
+}
+@keyframes pm-hand-r {
+  0%, 100% { transform: translate(12px, 16px); opacity: 0.15; }
+  22%, 82% { transform: translate(0, 0); opacity: 1; }
+}
+@keyframes pm-wisp {
+  0%   { transform: translateY(5px); opacity: 0; }
+  40%  { opacity: 1; }
+  100% { transform: translateY(-6px); opacity: 0; }
+}
+
+/* figure eight: x = −44·cos θ, y = −16·sin 2θ (sine-eased alternate animations) */
+.il-eight .eight-x { animation: eight-x 3s var(--ease-sine) infinite alternate; }
+.il-eight .eight-y { animation: eight-y 1.5s var(--ease-sine) -2.25s infinite alternate; }
+@keyframes eight-x { from { transform: translateX(-44px); } to { transform: translateX(44px); } }
+@keyframes eight-y { from { transform: translateY(-16px); } to { transform: translateY(16px); } }
+
+/* stretch */
+.il-stretch .st-glow { transform-origin: 60px 22px; animation: il-pulse 5s ease-in-out infinite; }
+.il-stretch .st-body { animation: st-body 5s var(--ease-in-out) infinite; }
+.il-stretch .st-arm { transform-origin: 60px 44px; }
+.il-stretch .st-arm-l { animation: st-arm-l 5s var(--ease-in-out) infinite; }
+.il-stretch .st-arm-r { animation: st-arm-r 5s var(--ease-in-out) infinite; }
+@keyframes st-body {
+  0%, 12%, 100% { transform: translateY(0); }
+  45%, 70%      { transform: translateY(-3px); }
+}
+@keyframes st-arm-l {
+  0%, 12%, 100% { transform: rotate(0deg); }
+  45%, 70%      { transform: rotate(100deg); }
+}
+@keyframes st-arm-r {
+  0%, 12%, 100% { transform: rotate(0deg); }
+  45%, 70%      { transform: rotate(-100deg); }
+}
+
+/* shoulder rolls */
+.il-shoulders .sh-shoulders { animation: sh-lift 4s var(--ease-in-out) infinite; }
+.il-shoulders .sh-arrow-l { transform-origin: 22px 52px; animation: spin-cw 4s linear infinite; }
+.il-shoulders .sh-arrow-r { transform-origin: 98px 52px; animation: spin-ccw 4s linear infinite; }
+@keyframes sh-lift {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-5px); }
+}
+@keyframes spin-cw { to { transform: rotate(360deg); } }
+@keyframes spin-ccw { to { transform: rotate(-360deg); } }
+
+/* water */
+.il-water .wa-water { fill: url(#il-water-grad); opacity: 0.78; }
+.il-water .wa-wave { animation: wa-wave 2.8s linear infinite; }
+.il-water .wa-drop { fill: url(#il-water-grad); animation: wa-drop 2.8s cubic-bezier(0.5, 0, 0.85, 0.45) infinite; }
+.il-water .wa-bubble { fill: rgba(255, 255, 255, 0.6); opacity: 0; animation: wa-bubble 3.2s ease-in infinite; }
+.il-water .wa-bubble-2 { animation-delay: 1.5s; }
+@keyframes wa-wave { from { transform: translateX(0); } to { transform: translateX(-20px); } }
+@keyframes wa-drop {
+  0%       { transform: translateY(-4px); opacity: 0; }
+  18%      { opacity: 1; }
+  68%      { transform: translateY(42px); opacity: 1; }
+  78%, 100% { transform: translateY(46px); opacity: 0; }
+}
+@keyframes wa-bubble {
+  0%   { transform: translateY(0); opacity: 0; }
+  25%  { opacity: 0.9; }
+  100% { transform: translateY(-30px); opacity: 0; }
+}
+
+
+/* ---------- smaller / shorter screens ---------- */
+@media (max-height: 820px) {
+  html { --ring-size: min(38vmin, 420px); }
+  .grace { gap: 10px; padding: 14px 20px 17px; }
+  .ov-btn-big { height: 48px; min-width: 108px; font-size: 15px; }
+  .exercise { padding: 12px 22px 14px 12px; }
+  .ex-art { width: 72px; height: 72px; border-radius: 18px; }
+  .ex-art .il { width: 64px; height: 64px; }
+  .ex-title { font-size: 17px; }
+  .ex-text { font-size: 13.5px; }
+  .ov-btn-hold { height: 46px; }
+  .snooze-group { height: 46px; }
+  .ov-btn-chip { height: 36px; }
+  .status-chip { height: 42px; }
+  .glass-chip { height: 40px; }
+  .hydration { height: 40px; }
+  .brand-mark { width: 26px; height: 26px; }
+  .stage { padding-bottom: calc(var(--gutter) + 8px); }
+}
+
+@media (max-height: 640px) {
+  html { --ring-size: min(34vmin, 420px); }
+  .breath { display: none; }
+}
+
+@media (max-width: 1180px) {
+  .topbar { grid-template-columns: auto minmax(0, 1fr); row-gap: 12px; }
+  .meta { justify-self: end; }
+  .topbar-center { grid-column: 1 / -1; grid-row: 2; }
+}
+
+@media (max-width: 760px) {
+  .cycle-text { display: none; }
+  .brand-name { font-size: 14px; }
+}
+
+@media (orientation: portrait) {
+  .stage-inner { gap: clamp(16px, 2.2vh, 32px); }
+  .panel { gap: clamp(20px, 3vh, 44px); }
+}
+
+/* ---------- accessibility ---------- */
+@media (prefers-reduced-motion: reduce) {
+  /* base.css shortens all transitions → the page simply appears at its configured tint, no ramp */
+  body { animation: none !important; }
+  .blob { animation: none !important; }
+  .is-breathing .halo-inner,
+  .is-breathing .halo-outer,
+  .is-breathing .breath-dot { animation: none !important; }
+  .panel,
+  .ring-wrap { transform: none; }
+  /* functional progress indicators keep their (slow, linear) timing */
+  .grace-bar,
+  .exercise-bar { transition-duration: var(--bar-ms, 0ms) !important; }
+  .ov-btn-hold.is-holding .hold-fill { transition-duration: var(--hold-ms, 3000ms) !important; }
+}
+
+@media (prefers-contrast: more) {
+  html {
+    --ov-muted: #d5dbeb;
+    --ov-faint: #b0b9d0;
+    --glass-line: rgba(255, 255, 255, 0.24);
+    --glass-border: rgba(255, 255, 255, 0.28);
+    --glass-alpha: 0.92;
+  }
+  .ring-track { stroke: rgba(255, 255, 255, 0.2); }
+  .ov-btn { border-color: rgba(255, 255, 255, 0.4); }
+}
+
+@media (forced-colors: active) {
+  /* the tint stays (system colours keep its alpha); decorative layers go */
+  .aurora,
+  .vignette,
+  .halo,
+  .disc,
+  .knob-rot,
+  .ring-arc-glow,
+  .ring-arc-haze { display: none; }
+  .ring-track { stroke: GrayText; }
+  .ring-arc-main { stroke: Highlight; }
+  .ring-ticks { stroke: GrayText; }
+  .ov-btn,
+  .panel,
+  .glass-chip,
+  .lock-fallback,
+  .grace,
+  .exercise,
+  .hydration,
+  .dock-hint { border: 1px solid CanvasText; }
+  .hold-fill { forced-color-adjust: none; background: Highlight; opacity: 0.5; }
+  .grace-bar,
+  .exercise-bar { forced-color-adjust: none; background: Highlight; }
+  .il-accent,
+  .il-line { stroke: CanvasText; }
+  .il-fill-accent { fill: CanvasText; }
+}
